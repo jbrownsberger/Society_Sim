@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hamlet Simulation</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header>
+  <h1>The Hamlet</h1>
+  <div class="header-info">
+    <span>Day <strong id="day-display">1</strong></span>
+    <span id="season-display" class="season-tag">Spring</span>
+    <span>Population <strong id="pop-display">10</strong></span>
+  </div>
+  <div class="controls">
+    <button id="btn-pause" class="active">Pause</button>
+    <button id="btn-1x">1×</button>
+    <button id="btn-5x">5×</button>
+    <button id="btn-20x">20×</button>
+  </div>
+</header>
+
+<div class="main">
+  <canvas id="world-canvas"></canvas>
+
+  <div class="sidebar">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="economy">Economy</button>
+      <button class="tab-btn" data-tab="people">People</button>
+      <button class="tab-btn" data-tab="inspector">Inspector</button>
+    </div>
+
+    <!-- Economy tab: market, infrastructure, price history, event log -->
+    <div class="tab-pane active" id="tab-economy">
+      <div class="panel">
+        <h2>Market Prices</h2>
+        <div id="market-dividend-status" style="font-size:0.78rem;color:var(--ink-faded);margin-bottom:6px"></div>
+        <div class="market-grid" id="market-grid"></div>
+      </div>
+      <div class="panel">
+        <h2>Infrastructure</h2>
+        <div id="infra-status" style="font-size:0.78rem;color:var(--ink-faded)"></div>
+      </div>
+      <div class="panel">
+        <h2>Price History</h2>
+        <canvas id="sparkline-canvas" width="290" height="80"></canvas>
+      </div>
+      <div class="log-panel" style="flex:1;max-height:none;overflow-y:auto;">
+        <h2>Event Log</h2>
+        <div id="event-log"></div>
+      </div>
+    </div>
+
+    <!-- People tab: village-wide time-use breakdown + scrollable NPC list -->
+    <div class="tab-pane" id="tab-people">
+      <div class="panel">
+        <h2>Demographics</h2>
+        <div id="demographics-status" style="font-size:0.78rem;color:var(--ink-faded)"></div>
+      </div>
+      <div class="panel">
+        <h2>Village Time Use</h2>
+        <div style="font-size:0.7rem;color:var(--ink-faded);margin-bottom:4px">Hours/day, village-wide (most recent day)</div>
+        <div id="time-use-aggregate"></div>
+      </div>
+      <div class="npc-list" id="npc-list" style="flex:1;overflow-y:auto;"></div>
+    </div>
+
+    <!-- Inspector tab: selected NPC detail -->
+    <div class="tab-pane" id="tab-inspector">
+      <div class="inspector" id="inspector">
+        <h2>Inspector</h2>
+        <p style="font-size:0.8rem;color:var(--ink-faded);font-style:italic;margin-top:4px;">
+          Click a villager on the map or in the People tab.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

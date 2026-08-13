@@ -1,0 +1,19 @@
+{
+  "name": "society-sim",
+  "version": "1.0.0",
+  "description": "The Hamlet Simulation - An agent-based socio-economic village simulation",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "simulation",
+    "agent-based",
+    "economy",
+    "javascript",
+    "canvas"
+  ],
+  "author": "",
+  "license": "ISC"
+}

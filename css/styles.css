@@ -1,0 +1,350 @@
+@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Crimson+Pro:wght@300;400;600&display=swap');
+
+  :root {
+    --parchment: #f2e8d5;
+    --parchment-dark: #e8d9bc;
+    --ink: #2c1810;
+    --ink-faded: #6b4c3b;
+    --accent: #8b3a1a;
+    --accent-light: #c4622d;
+    --grass: #5a7a3a;
+    --grass-light: #7a9a5a;
+    --water: #4a7a9b;
+    --stone: #8a8070;
+    --panel-bg: rgba(242, 232, 213, 0.97);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    font-family: 'Crimson Pro', serif;
+    color: var(--ink);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    background: var(--ink);
+    color: var(--parchment);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--accent);
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-family: 'IM Fell English', serif;
+    font-size: 1.4rem;
+    letter-spacing: 0.05em;
+  }
+
+  .header-info {
+    display: flex;
+    gap: 24px;
+    font-size: 0.9rem;
+    color: var(--parchment-dark);
+  }
+
+  .header-info span { font-family: 'Crimson Pro', serif; }
+  .header-info strong { color: var(--parchment); font-weight: 600; }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  button {
+    font-family: 'Crimson Pro', serif;
+    font-size: 0.85rem;
+    padding: 4px 12px;
+    background: transparent;
+    color: var(--parchment);
+    border: 1px solid var(--ink-faded);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.03em;
+  }
+
+  button:hover { background: var(--accent); border-color: var(--accent); }
+  button.active { background: var(--accent); border-color: var(--accent-light); }
+
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  canvas {
+    flex-shrink: 0;
+    display: block;
+  }
+
+  .sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--parchment);
+    border-left: 2px solid var(--accent);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel {
+    border-bottom: 1px solid var(--parchment-dark);
+    padding: 10px 14px;
+    flex-shrink: 0;
+  }
+
+  .panel h2 {
+    font-family: 'IM Fell English', serif;
+    font-size: 0.95rem;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--parchment-dark);
+    padding-bottom: 4px;
+  }
+
+  .market-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px;
+  }
+
+  .market-item {
+    background: var(--parchment-dark);
+    padding: 5px 7px;
+    border-radius: 2px;
+  }
+
+  .market-item .good-name {
+    font-size: 0.7rem;
+    color: var(--ink-faded);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .market-item .good-price {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .market-item .good-unmet {
+    font-size: 0.7rem;
+    color: var(--accent);
+  }
+
+  .sparkline-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+  }
+
+  .sparkline-label {
+    width: 60px;
+    font-size: 0.75rem;
+    color: var(--ink-faded);
+  }
+
+  .npc-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .npc-item {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--parchment-dark);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .npc-item:hover { background: var(--parchment-dark); }
+  .npc-item.selected { background: #e8d0b0; }
+
+  .npc-item .npc-name {
+    font-family: 'IM Fell English', serif;
+    font-size: 0.95rem;
+    color: var(--ink);
+  }
+
+  .npc-item .npc-prof {
+    font-size: 0.78rem;
+    color: var(--ink-faded);
+    font-style: italic;
+  }
+
+  .needs-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+  }
+
+  .needs-bar-label {
+    width: 52px;
+    font-size: 0.68rem;
+    color: var(--ink-faded);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .needs-bar-bg {
+    flex: 1;
+    height: 5px;
+    background: var(--parchment-dark);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .needs-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  /* Inspector is now a full tab — styles moved to tab system section */
+
+  .inspector-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .stat-box {
+    background: var(--parchment);
+    padding: 5px 8px;
+    border-radius: 2px;
+  }
+
+  .stat-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-faded);
+  }
+
+  .stat-value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .ev-table {
+    width: 100%;
+    font-size: 0.75rem;
+    border-collapse: collapse;
+    margin-top: 4px;
+  }
+
+  .ev-table th {
+    text-align: left;
+    color: var(--ink-faded);
+    font-weight: 400;
+    font-style: italic;
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--parchment-dark);
+  }
+
+  .ev-table td {
+    padding: 2px 4px;
+    color: var(--ink);
+  }
+
+  .ev-table tr.current-prof td { color: var(--accent); font-weight: 600; }
+
+  .log-panel {
+    padding: 8px 14px;
+    flex-shrink: 0;
+    max-height: 120px;
+    overflow-y: auto;
+    border-top: 1px solid var(--parchment-dark);
+    background: var(--parchment);
+  }
+
+  .log-panel h2 {
+    font-family: 'IM Fell English', serif;
+    font-size: 0.85rem;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .log-entry {
+    font-size: 0.72rem;
+    color: var(--ink-faded);
+    line-height: 1.5;
+    font-style: italic;
+  }
+
+  .log-entry .day-tag {
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  .season-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    font-size: 0.75rem;
+    border-radius: 2px;
+    font-style: italic;
+  }
+
+  /* ── Tab system ─────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    flex-shrink: 0;
+    background: var(--parchment-dark);
+    border-bottom: 2px solid var(--accent);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 7px 4px;
+    font-family: 'IM Fell English', serif;
+    font-size: 0.82rem;
+    background: transparent;
+    color: var(--ink-faded);
+    border: none;
+    border-right: 1px solid #d4c5a9;
+    cursor: pointer;
+    transition: all 0.12s;
+    letter-spacing: 0.03em;
+  }
+  .tab-btn:last-child { border-right: none; }
+  .tab-btn:hover { background: var(--parchment); color: var(--ink); }
+  .tab-btn.active {
+    background: var(--parchment);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+  .tab-pane {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+  .tab-pane.active { display: flex; }
+
+  /* Inspector fills its tab */
+  .inspector {
+    padding: 10px 14px;
+    overflow-y: auto;
+    flex: 1;
+    background: #ede0c8;
+  }
+  .inspector h2 {
+    font-family: 'IM Fell English', serif;
+    font-size: 0.95rem;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
