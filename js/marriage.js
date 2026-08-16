@@ -1,10 +1,7 @@
-import { world, logEvent } from './world.js';
-import { rng } from '../config/rng.js';
-import { SYLLABLES, generateChildName, makeNPC } from './npc.js';
-import { getRelation, getAffinity, bumpAffinity, seedKinshipAffinity } from './relations.js';
-import { hasWorkableAsset, findStructureByAssetId, recordStructureTransfer } from './assets.js';
-import { prestigeTarget } from './prestige.js';
-import { GOODS, CHILDHOOD_DAYS } from '../config/constants.js';
+import { ACTIVITY_SOCIAL_CAP, CHILDHOOD_DAYS, DOG_YEAR_DAYS, GOODS, GRID_ANCHOR, GRID_CELL, MATERIAL_COMFORT_CAP, NEEDS, familyChannelTarget, familyTargetFromComposition, generateChildName, needMarginalUtility } from './constants.js';
+import { rng } from './rng.js';
+import { bumpAffinity, getAffinity, logEvent, seedKinshipAffinity, world } from './state.js';
+import { makeNPC } from './npc.js';
 
 // ─────────────────────────────────────────────
 // MARRIAGE & CHILDBIRTH
@@ -50,7 +47,12 @@ export const CHILDBIRTH_MATERIAL_COST = 15; // midwife/supplies, split between p
 export const CHILDBIRTH_UTILITY_COST = 3;
 export const CHILD_FOOD_COST_PER_DAY  = 0.4; // roughly a child's share of an adult's daily bread target
 export const MAX_CHILDREN_PER_COUPLE = 5;   // familyChannelTarget's diminishing returns already discourage more than a few; this is just a hard backstop
-export const MIN_BIRTH_SPACING_DAYS = Math.round(CHILDHOOD_DAYS * 0.4); // real gap between children — without this, a couple would have all 5 kids within the same handful of days the moment they married, since nothing else throttled it
+// Was `Math.round(CHILDHOOD_DAYS * 0.4)` (CHILDHOOD_DAYS === 150, from
+// constants.js) — inlined as a literal instead of importing CHILDHOOD_DAYS
+// here, since constants.js transitively imports this file (via npc.js) and
+// referencing CHILDHOOD_DAYS at this module's top level would read it
+// before constants.js's own top-level body has run.
+export const MIN_BIRTH_SPACING_DAYS = 60; // real gap between children — without this, a couple would have all 5 kids within the same handful of days the moment they married, since nothing else throttled it
 export const CHILDBIRTH_MAX_AGE_DOGYEARS = 8; // past this, seek_child is no longer offered at all
 export const STARVATION_DEATH_DAYS = 25; // consecutive days at/below NEEDS.food.starvationFloor before death — a real cliff, not just a scoring penalty
 
@@ -62,22 +64,22 @@ export const STARVATION_DEATH_DAYS = 25; // consecutive days at/below NEEDS.food
 // satisfyNeeds), same spirit as computeConstructionEV pricing a
 // hypothetical finished asset instead of modeling the ramp-up in detail.
 export function marriageUtilityGain(npc) {
-  export const before = familyChannelTarget(npc);
-  export const n = npc.childIds ? npc.childIds.length : 0;
-  export const after = familyTargetFromComposition(/*hasSpouse=*/true, n);
+  const before = familyChannelTarget(npc);
+  const n = npc.childIds ? npc.childIds.length : 0;
+  const after = familyTargetFromComposition(/*hasSpouse=*/true, n);
   return familyUtilityFromDelta(npc, after - before);
 }
 export function childbirthUtilityGain(npc) {
-  export const before = familyChannelTarget(npc);
-  export const hasSpouse = npc.spouseId != null && world.npcs.has(npc.spouseId);
-  export const n = (npc.childIds ? npc.childIds.length : 0) + 1;
-  export const after = familyTargetFromComposition(hasSpouse, n);
+  const before = familyChannelTarget(npc);
+  const hasSpouse = npc.spouseId != null && world.npcs.has(npc.spouseId);
+  const n = (npc.childIds ? npc.childIds.length : 0) + 1;
+  const after = familyTargetFromComposition(hasSpouse, n);
   return familyUtilityFromDelta(npc, after - before);
 }
 export function familyUtilityFromDelta(npc, delta) {
-  export const muComfort = needMarginalUtility(npc, 'comfort');
-  export const muSocial  = needMarginalUtility(npc, 'social');
-  export const muMeaning = needMarginalUtility(npc, 'meaning');
+  const muComfort = needMarginalUtility(npc, 'comfort');
+  const muSocial  = needMarginalUtility(npc, 'social');
+  const muMeaning = needMarginalUtility(npc, 'meaning');
   return delta * ((1 - MATERIAL_COMFORT_CAP) * muComfort + (1 - ACTIVITY_SOCIAL_CAP) * muSocial + muMeaning);
 }
 
@@ -108,11 +110,11 @@ export function resolveHelpRequests() {
   world.helpRequests = world.helpRequests.filter(req => {
     if (req.resolved) return false;
     if (world.day - req.day < HELP_REQUEST_EXPIRY_DAYS) return true;
-    export const target = world.npcs.get(req.targetId);
-    export const requester = world.npcs.get(req.requesterId);
+    const target = world.npcs.get(req.targetId);
+    const requester = world.npcs.get(req.requesterId);
     if (target && requester) {
-      export const establishedGoodwill = getAffinity(target, req.requesterId) >= HELP_REFUSAL_AFFINITY_THRESHOLD;
-      export const hadCapacity = target.savings > req.amount + 5;
+      const establishedGoodwill = getAffinity(target, req.requesterId) >= HELP_REFUSAL_AFFINITY_THRESHOLD;
+      const hadCapacity = target.savings > req.amount + 5;
       if (establishedGoodwill && hadCapacity) {
         bumpAffinity(requester, target.id, -HELP_REFUSAL_PENALTY);
         logEvent(`${requester.name} felt let down after ${target.name} didn't come through in their time of need.`, [requester.id, target.id]);
@@ -123,20 +125,20 @@ export function resolveHelpRequests() {
 }
 
 export function runMarriageMarket() {
-  export const seekers = [...world.npcs.values()].filter(n => n._seekingMarriageToday && n.spouseId == null);
+  const seekers = [...world.npcs.values()].filter(n => n._seekingMarriageToday && n.spouseId == null);
   for (let i = seekers.length - 1; i > 0; i--) {
-    export const j = Math.floor(rng.float(0, i + 1));
+    const j = Math.floor(rng.float(0, i + 1));
     [seekers[i], seekers[j]] = [seekers[j], seekers[i]];
   }
-  export const matched = new Set();
+  const matched = new Set();
   for (const a of seekers) {
     if (matched.has(a.id)) continue;
-    export let bestB = null, bestJoint = -Infinity;
+    let bestB = null, bestJoint = -Infinity;
     for (const b of seekers) {
       if (b.id === a.id || matched.has(b.id)) continue;
-      export const gainA = marriageUtilityGain(a), gainB = marriageUtilityGain(b);
+      const gainA = marriageUtilityGain(a), gainB = marriageUtilityGain(b);
       if (gainA <= 0 || gainB <= 0) continue; // BOTH sides must genuinely benefit, not just the proposer
-      export const joint = gainA + gainB;
+      const joint = gainA + gainB;
       if (joint > bestJoint) { bestJoint = joint; bestB = b; }
     }
     if (bestB) { marryCouple(a, bestB); matched.add(a.id); matched.add(bestB.id); }
@@ -144,7 +146,7 @@ export function runMarriageMarket() {
 }
 
 export function marryCouple(a, b) {
-  export const costEach = MARRIAGE_CASH_COST / 2;
+  const costEach = MARRIAGE_CASH_COST / 2;
   a.savings = Math.max(0, a.savings - costEach);
   b.savings = Math.max(0, b.savings - costEach);
   world.church.cash += costEach * 2; // wedding fee — same redistribution pool as tithes, not a sink
@@ -171,16 +173,16 @@ export function marryCouple(a, b) {
 // scoring-time check, since a day can pass between when the action was
 // scored and when it executes.
 export function attemptChildbirth(npc) {
-  export const spouse = world.npcs.get(npc.spouseId);
+  const spouse = world.npcs.get(npc.spouseId);
   if (!spouse) return;
   if (npc.childIds.length >= MAX_CHILDREN_PER_COUPLE) return;
   if (npc.age >= CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS) return;
   if (spouse.age >= CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS) return;
   if ((world.day - npc.lastChildbirthDay) < MIN_BIRTH_SPACING_DAYS) return;
   if ((world.day - spouse.lastChildbirthDay) < MIN_BIRTH_SPACING_DAYS) return;
-  export const combinedSavings = npc.savings + spouse.savings;
+  const combinedSavings = npc.savings + spouse.savings;
   if (combinedSavings < CHILDBIRTH_MATERIAL_COST) return;
-  export const share = Math.min(npc.savings, CHILDBIRTH_MATERIAL_COST / 2);
+  const share = Math.min(npc.savings, CHILDBIRTH_MATERIAL_COST / 2);
   npc.savings -= share;
   spouse.savings -= (CHILDBIRTH_MATERIAL_COST - share);
   world.church.cash += CHILDBIRTH_MATERIAL_COST; // midwife/blessing fee — same pool as tithes, not a sink
@@ -189,8 +191,8 @@ export function attemptChildbirth(npc) {
 
 export let nextChildId = 0;
 export function spawnChild(mother, father) {
-  export const { name, syllables } = generateChildName(mother.syllables, father.syllables, rng);
-  export const child = { id: nextChildId++, name, syllables, parentIds: [mother.id, father.id], age: 0 };
+  const { name, syllables } = generateChildName(mother.syllables, father.syllables, rng);
+  const child = { id: nextChildId++, name, syllables, parentIds: [mother.id, father.id], age: 0 };
   world.children.set(child.id, child);
   mother.childIds.push(child.id);
   father.childIds.push(child.id);
@@ -209,8 +211,8 @@ export function spawnChild(mother, father) {
 export function tickChildren() {
   for (const child of [...world.children.values()]) {
     child.age++;
-    export const parents = child.parentIds.map(id => world.npcs.get(id)).filter(Boolean);
-    export let fed = false;
+    const parents = child.parentIds.map(id => world.npcs.get(id)).filter(Boolean);
+    let fed = false;
     for (const p of parents) {
       if ((p.inventory.bread ?? 0) >= CHILD_FOOD_COST_PER_DAY) {
         p.inventory.bread -= CHILD_FOOD_COST_PER_DAY;
@@ -218,7 +220,7 @@ export function tickChildren() {
       }
     }
     if (!fed) {
-      export const cost = CHILD_FOOD_COST_PER_DAY * (world.market.goods.bread?.askPrice ?? GOODS.bread.baseValue);
+      const cost = CHILD_FOOD_COST_PER_DAY * (world.market.goods.bread?.askPrice ?? GOODS.bread.baseValue);
       for (const p of parents) {
         if (p.savings > cost) {
           p.savings -= cost;
@@ -239,7 +241,7 @@ export function tickChildren() {
 export function graduateChild(child) {
   world.children.delete(child.id);
   for (const pid of child.parentIds) {
-    export const p = world.npcs.get(pid);
+    const p = world.npcs.get(pid);
     if (p) p.childIds = p.childIds.filter(id => id !== child.id);
   }
   // Becomes a real, independent NPC — starts as a woodcutter (needs no
@@ -248,8 +250,8 @@ export function graduateChild(child) {
   // considerHouseConstruction). A nice future hook for the tier-
   // progression vision: let them inherit a parent's asset instead of
   // starting from zero — deliberately not built yet.
-  export const parent = child.parentIds.map(id => world.npcs.get(id)).find(Boolean);
-  export const npc = makeNPC('woodcutter', parent ? parent.homeX : GRID_ANCHOR.gx * GRID_CELL, parent ? parent.homeY : GRID_ANCHOR.gy * GRID_CELL);
+  const parent = child.parentIds.map(id => world.npcs.get(id)).find(Boolean);
+  const npc = makeNPC('woodcutter', parent ? parent.homeX : GRID_ANCHOR.gx * GRID_CELL, parent ? parent.homeY : GRID_ANCHOR.gy * GRID_CELL);
   npc.name = child.name;
   npc.syllables = child.syllables;
   npc.age = CHILDHOOD_DAYS;
@@ -260,105 +262,3 @@ export function graduateChild(child) {
   logEvent(`${npc.name} comes of age and starts an independent life.`, [npc.id, ...(npc.parentIds || [])]);
 }
 
-// ─────────────────────────────────────────────
-// DEATH
-// ─────────────────────────────────────────────
-//
-// Two causes, both real physical limits rather than scoring penalties:
-// old age (a lifespan sampled once per NPC at creation — see makeNPC —
-// so deaths spread out instead of clustering) and chronic starvation
-// (STARVATION_DEATH_DAYS consecutive days at/below NEEDS.food.
-// starvationFloor — the same floor that already drives the starvation-
-// severity multiplier in needMarginalUtility, just carried to its actual
-// conclusion instead of only ever being a scoring signal).
-
-export function findLivingAdultChildren(npc) {
-  export const kids = [];
-  for (const other of world.npcs.values()) {
-    if (other.id !== npc.id && other.parentIds && other.parentIds.includes(npc.id)) kids.push(other);
-  }
-  return kids;
-}
-
-export function killNPC(npc, cause) {
-  export const spouse = npc.spouseId != null ? world.npcs.get(npc.spouseId) : null;
-  export const heirs = spouse ? [spouse] : findLivingAdultChildren(npc);
-
-  if (heirs.length > 0) {
-    // Inherit assets to the surviving spouse, or — if there's no spouse
-    // — split among living adult children (grown, graduated ones only;
-    // still-dependent children in world.children can't hold property in
-    // this model — see the fallback note below). Round-robin rather than
-    // all-to-one, so multiple heirs each actually get something when
-    // there's more than one asset. Keeps productive assets and the
-    // marital/family home in use rather than frozen ownership pointing
-    // at nobody.
-    npc.ownedAssets.forEach((assetId, i) => {
-      export const heir = heirs[i % heirs.length];
-      export const asset = world.assets.get(assetId);
-      if (!asset) return;
-      asset.ownerId = heir.id;
-      heir.ownedAssets.push(assetId);
-      recordStructureTransfer(findStructureByAssetId(asset.id), npc.id, heir.id, 'inherited');
-      if (assetId === npc.primaryAsset && heir.primaryAsset == null) heir.primaryAsset = assetId;
-      if (assetId === npc.primaryHouse && heir.primaryHouse == null) heir.primaryHouse = assetId;
-    });
-    // FIX: this was the actual money leak. Only ASSETS were being
-    // inherited — npc.savings (liquid cash) was never transferred
-    // anywhere and simply vanished the moment world.npcs.delete()
-    // discarded the object. Over many deaths this destroyed a large
-    // fraction of the village's total money supply, which is why
-    // survivors ended up with far less cash than the whole village's
-    // wealth should have concentrated into. Split evenly across heirs,
-    // same spirit as the asset round-robin above.
-    export const share = npc.savings / heirs.length;
-    for (const heir of heirs) heir.savings += share;
-    if (spouse) spouse.spouseId = null; // widowed
-  } else {
-    // No spouse and no living adult children to inherit — release assets
-    // back into the economy via the ordinary auction path (fixed to
-    // handle a null/orphaned owner — see runAssetAuctions) rather than
-    // freezing them forever pointing at a dead id. Still-dependent
-    // children (in world.children, not yet graduated) aren't eligible
-    // heirs in this pass — holding property in trust for a minor isn't
-    // modeled — so if only minors survive, assets fall back to auction
-    // too. Cash with no heir goes to the Church as an unclaimed estate —
-    // same pattern as every other "nobody left to receive this" case in
-    // the sim — rather than vanishing.
-    for (const assetId of npc.ownedAssets) {
-      export const asset = world.assets.get(assetId);
-      if (!asset) continue;
-      asset.ownerId = null;
-      asset.forSale = true;
-      asset.auctionAttempts = 0;
-    }
-    world.church.cash += npc.savings;
-  }
-  world.npcs.delete(npc.id);
-  world.totalDeaths++;
-  world.deathsByCause[cause === 'old age' ? 'oldAge' : 'starvation']++;
-  logEvent(`${npc.name} has died (${cause}).`, [npc.id]);
-}
-
-export function tickAgingAndDeaths() {
-  export const toKill = [];
-  for (const npc of world.npcs.values()) {
-    npc.age++;
-
-    if (npc.needs.food <= NEEDS.food.starvationFloor) {
-      npc.starvingDays++;
-    } else {
-      npc.starvingDays = 0;
-    }
-
-    if (npc.age >= npc.naturalLifespanDays) {
-      toKill.push([npc, 'old age']);
-    } else if (npc.starvingDays >= STARVATION_DEATH_DAYS) {
-      toKill.push([npc, 'starvation']);
-    }
-  }
-  // Collect-then-kill rather than deleting from world.npcs mid-iteration
-  // above — modifying a Map while for..of-ing over its values() is
-  // unreliable.
-  for (const [npc, cause] of toKill) killNPC(npc, cause);
-}

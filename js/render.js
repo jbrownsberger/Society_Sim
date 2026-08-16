@@ -1,5 +1,7 @@
-import { world } from '../core/world.js';
-import { GRID_CELL, FOOTPRINTS, ASSET_TYPES } from '../config/constants.js';
+import { ASSET_TYPES, PROFESSIONS, findStructureByType } from './constants.js';
+import { rng } from './rng.js';
+import { world } from './state.js';
+import { selection } from './ui.js';
 
 // ─────────────────────────────────────────────
 // RENDERING
@@ -9,12 +11,14 @@ export const canvas = document.getElementById('world-canvas');
 export const ctx    = canvas.getContext('2d');
 
 export function resizeCanvas() {
-  export const sidebar = document.querySelector('.sidebar');
+  const sidebar = document.querySelector('.sidebar');
   canvas.width  = window.innerWidth - sidebar.offsetWidth;
   canvas.height = window.innerHeight - document.querySelector('header').offsetHeight;
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+export function initCanvas() {
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+}
 
 export const ACTION_COLORS = {
   work:        '#8B6914',
@@ -38,8 +42,8 @@ export function getActionColor(npcOrActionId) {
   // over whatever the NPC's schedule says today, since "building a mill"
   // is the more informative, longer-running state a player would want to
   // see at a glance.
-  export const npc = (npcOrActionId && typeof npcOrActionId === 'object') ? npcOrActionId : null;
-  export const actionId = npc ? npc.currentAction : npcOrActionId;
+  const npc = (npcOrActionId && typeof npcOrActionId === 'object') ? npcOrActionId : null;
+  const actionId = npc ? npc.currentAction : npcOrActionId;
   if (npc && npc.constructionProject)  return ACTION_COLORS.building;
   if (actionId === 'hired-labor')      return ACTION_COLORS.hired_labor;
   if (actionId?.startsWith('work'))    return ACTION_COLORS.work;
@@ -51,11 +55,11 @@ export function getActionColor(npcOrActionId) {
 }
 
 export function drawScene(alpha) {
-  export const W = canvas.width, H = canvas.height;
+  const W = canvas.width, H = canvas.height;
   ctx.clearRect(0,0,W,H);
 
   // Background — season-tinted grass
-  export const seasonColors = {
+  const seasonColors = {
     spring: '#6b8f4a', summer: '#5a7a3a', autumn: '#8a7040', winter: '#8a9090'
   };
   ctx.fillStyle = seasonColors[world.season];
@@ -72,7 +76,7 @@ export function drawScene(alpha) {
   ctx.strokeStyle = '#c4a87a';
   ctx.lineWidth = 6;
   ctx.globalAlpha = 0.5;
-  export const marketS = findStructureByType('market');
+  const marketS = findStructureByType('market');
   if (marketS) {
     for (const npc of world.npcs.values()) {
       ctx.beginPath();
@@ -91,14 +95,14 @@ export function drawScene(alpha) {
   // owner is actively working it themselves today OR any hired laborer
   // is currently clocked in there — reuses the same currentAction/
   // employedLaborIds data the structure inspector already surfaces.
-  export function isStructureInUse(s) {
-    export const asset = s.assetId != null ? world.assets.get(s.assetId) : null;
+  function isStructureInUse(s) {
+    const asset = s.assetId != null ? world.assets.get(s.assetId) : null;
     if (!asset) return true;
     if (s.type === 'house') return s.ownerId != null;
-    export const owner = s.ownerId != null ? world.npcs.get(s.ownerId) : null;
+    const owner = s.ownerId != null ? world.npcs.get(s.ownerId) : null;
     if (owner && owner.currentAction === 'work' && PROFESSIONS[owner.profession]?.requires === s.type) return true;
     for (const wid of (asset.employedLaborIds ?? [])) {
-      export const w = world.npcs.get(wid);
+      const w = world.npcs.get(wid);
       if (w && w.currentAction === 'hired-labor') return true;
     }
     return false;
@@ -109,7 +113,7 @@ export function drawScene(alpha) {
   // so a land-consolidation pattern (one family quietly buying up every
   // mill in the village) reads visually rather than requiring you to
   // click through every building's inspector to notice.
-  export const ownerProductiveCounts = new Map();
+  const ownerProductiveCounts = new Map();
   for (const s of world.structures.values()) {
     if (s.ownerId != null && s.type !== 'house' && ASSET_TYPES[s.type]) {
       ownerProductiveCounts.set(s.ownerId, (ownerProductiveCounts.get(s.ownerId) || 0) + 1);
@@ -119,8 +123,8 @@ export function drawScene(alpha) {
   // owner always gets the same color across buildings and re-renders,
   // and successive owner ids land far apart in hue so adjacent owners
   // don't get visually-confusable colors.
-  export function ownerColor(ownerId) {
-    export const hue = (ownerId * 137.508) % 360;
+  function ownerColor(ownerId) {
+    const hue = (ownerId * 137.508) % 360;
     return `hsl(${hue}, 70%, 45%)`;
   }
 
@@ -224,12 +228,12 @@ export function drawScene(alpha) {
 
   // NPCs — interpolate position
   for (const npc of world.npcs.values()) {
-    export const x = npc.x + (npc.destX - npc.x) * 0.12;
-    export const y = npc.y + (npc.destY - npc.y) * 0.12;
+    const x = npc.x + (npc.destX - npc.x) * 0.12;
+    const y = npc.y + (npc.destY - npc.y) * 0.12;
     npc.x = x; npc.y = y;
 
-    export const color = getActionColor(npc);
-    export const isSelected = selectedNPC === npc.id;
+    const color = getActionColor(npc);
+    const isSelected = selection.npc === npc.id;
 
     // Shadow
     ctx.beginPath();
@@ -270,3 +274,4 @@ export function drawScene(alpha) {
     ctx.fillText(npc.name, x, y-16);
   }
 }
+

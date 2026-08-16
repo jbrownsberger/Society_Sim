@@ -1,23 +1,57 @@
-import { world } from '../core/world.js';
-import { shadowPriceGood } from './shadowPrices.js';
-import { effectiveSkill } from '../simulation/actions.js';
-import { buildingProductivity } from '../core/assets.js';
-import { PROFESSIONS } from '../config/constants.js';
+import { ASSET_TYPES, LABOR_DISUTILITY, PROFESSIONS, SEASONAL_GRAIN, buildingProductivity, hasWorkableAsset } from './constants.js';
+import { world } from './state.js';
+import { expectedPrice, lambda } from './prices.js';
 
-export const profId = ASSET_TYPES[asset.type].profession;
-  export const prof = PROFESSIONS[profId];
+// ─────────────────────────────────────────────
+// LABOR MARKET — hired labor at owned assets
+// ─────────────────────────────────────────────
+//
+// An asset owner with spare capacity (their farm/mill/forge/workshop can
+// support more than one worker, per ASSET_TYPES' capacity field) can hire
+// someone else to work it. This is the missing piece that lets a
+// struggling or absent owner still extract value from an asset instead of
+// their only options being "grind it out alone" or "abandon it entirely"
+// — directly targeting the one-way collapse into woodcutting observed in
+// testing, where asset professions had no recovery path once an owner
+// faltered.
+//
+// Mechanics, kept deliberately simple for a first pass:
+//   - Each day, every asset owner with spare capacity posts a wage offer
+//     equal to a fraction of the marginal output value an additional
+//     worker would generate (owner keeps the surplus as their profit —
+//     the classic capital/labor split).
+//   - Any NPC without a workable primary asset of their own (today, this
+//     is effectively "woodcutters and other unemployed/asset-less NPCs")
+//     compares the best available wage offer against their own best
+//     self-employment EV (workSessionEV) and takes whichever pays more.
+//   - Hired labor produces at the LABORER's own skill level, but goods
+//     accrue to the EMPLOYER's inventory (the employer owns the output,
+//     same as any real employment relationship) — and the employer pays
+//     the wage immediately from savings, whether or not they've sold
+//     that output yet (a short-term cash outlay against future revenue,
+//     which is exactly what real capital owners do).
+
+export const LABOR_WAGE_SHARE = 0.55; // laborer's cut of marginal output value; owner keeps the rest as profit
+
+// Marginal output value of adding ONE more worker at this asset, using
+// the OWNER's context for pricing (expectedPrice etc. are npc-specific
+// memory, but using the owner's is a reasonable proxy for "what this
+// asset's output is worth to sell").
+export function marginalHireValue(owner, asset) {
+  const profId = ASSET_TYPES[asset.type].profession;
+  const prof = PROFESSIONS[profId];
   if (!prof) return 0;
   // Assume a competent hire (steady-state skill) for the wage-setting
   // calculation — the owner doesn't know the specific hire's skill yet
   // when deciding what to offer.
-  export const assumedSkill = 0.8;
-  export const buildMod = buildingProductivity(profId);
-  export const seasonal = profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
-  export let revenue = 0;
+  const assumedSkill = 0.8;
+  const buildMod = buildingProductivity(profId);
+  const seasonal = profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
+  let revenue = 0;
   for (const [g, qty] of Object.entries(prof.outputs)) {
     revenue += qty * assumedSkill * buildMod * seasonal * expectedPrice(owner, g);
   }
-  export let inputCost = 0;
+  let inputCost = 0;
   for (const [g, qty] of Object.entries(prof.inputs)) {
     inputCost += qty * expectedPrice(owner, g);
   }
@@ -52,17 +86,17 @@ export function postWageOffers() {
   // Step 1: collect DEMAND — one entry per (owner, asset) with spare
   // capacity, per profession, each with its own marginal value and
   // affordability cap.
-  export const demandByProf = {}; // profId -> [{assetId, employerId, marginalValue, maxAffordable, slotsRemaining}]
+  const demandByProf = {}; // profId -> [{assetId, employerId, marginalValue, maxAffordable, slotsRemaining}]
   for (const owner of world.npcs.values()) {
     for (const assetId of owner.ownedAssets) {
-      export const asset = world.assets.get(assetId);
+      const asset = world.assets.get(assetId);
       if (!asset || asset.forSale) continue;
-      export const currentWorkers = (asset.employedLaborIds?.length ?? 0) + (owner.primaryAsset === asset.id ? 1 : 0);
-      export const spareCapacity = asset.capacity - currentWorkers;
+      const currentWorkers = (asset.employedLaborIds?.length ?? 0) + (owner.primaryAsset === asset.id ? 1 : 0);
+      const spareCapacity = asset.capacity - currentWorkers;
       if (spareCapacity <= 0) continue;
-      export const marginalValue = marginalHireValue(owner, asset);
+      const marginalValue = marginalHireValue(owner, asset);
       if (marginalValue <= 0) continue;
-      export const profId = ASSET_TYPES[asset.type].profession;
+      const profId = ASSET_TYPES[asset.type].profession;
       (demandByProf[profId] ??= []).push({
         assetId: asset.id, employerId: owner.id, marginalValue,
         maxAffordable: owner.savings, slotsRemaining: spareCapacity,
@@ -75,11 +109,11 @@ export function postWageOffers() {
   // best alternative EV (self-employment elsewhere, converted to a
   // per-session wage-equivalent via LABOR_DISUTILITY) — this is their
   // reservation wage, same economic idea as an ask price.
-  export const supplyByProf = {};
+  const supplyByProf = {};
   for (const npc of world.npcs.values()) {
     for (const profId of Object.keys(PROFESSIONS)) {
       if (hasWorkableAsset(npc, profId)) continue; // owners work their own asset directly, not as hired labor
-      export const reservation = Math.max(0, (npc.memory.ev[npc.profession] ?? 0) + LABOR_DISUTILITY) / Math.max(lambda(npc), 0.01);
+      const reservation = Math.max(0, (npc.memory.ev[npc.profession] ?? 0) + LABOR_DISUTILITY) / Math.max(lambda(npc), 0.01);
       (supplyByProf[profId] ??= []).push({ npcId: npc.id, reservation });
     }
   }
@@ -91,25 +125,25 @@ export function postWageOffers() {
   // without persistent inventory.
   world.laborMarket = [];
   for (const profId of Object.keys(PROFESSIONS)) {
-    export const demand = (demandByProf[profId] || []).slice().sort((a,b) => b.marginalValue - a.marginalValue);
-    export const supply = (supplyByProf[profId] || []).slice().sort((a,b) => a.reservation - b.reservation);
+    const demand = (demandByProf[profId] || []).slice().sort((a,b) => b.marginalValue - a.marginalValue);
+    const supply = (supplyByProf[profId] || []).slice().sort((a,b) => a.reservation - b.reservation);
     if (demand.length === 0 || supply.length === 0) continue;
 
     // Total open slots vs. total willing workers — find the clearing
     // wage at the crossing point, same as reading a supply/demand chart.
-    export const totalSlots = demand.reduce((s,d) => s + d.slotsRemaining, 0);
-    export const clearIdx = Math.min(totalSlots, supply.length) - 1;
+    const totalSlots = demand.reduce((s,d) => s + d.slotsRemaining, 0);
+    const clearIdx = Math.min(totalSlots, supply.length) - 1;
     if (clearIdx < 0) continue;
-    export const clearingReservation = supply[clearIdx].reservation;
+    const clearingReservation = supply[clearIdx].reservation;
     // Wage splits the marginal value at the margin between employer and
     // laborer, same LABOR_WAGE_SHARE logic as before, but now anchored to
     // an actual market-clearing point rather than one employer's offer.
-    export const marginalDemand = demand[Math.min(demand.length, totalSlots) - 1]?.marginalValue ?? demand[0].marginalValue;
-    export let wage = Math.max(clearingReservation, marginalDemand * LABOR_WAGE_SHARE);
+    const marginalDemand = demand[Math.min(demand.length, totalSlots) - 1]?.marginalValue ?? demand[0].marginalValue;
+    let wage = Math.max(clearingReservation, marginalDemand * LABOR_WAGE_SHARE);
     wage = Math.min(wage, marginalDemand); // employer never pays more than the hire is worth to them
 
     for (const d of demand) {
-      export const affordableWage = Math.min(wage, d.maxAffordable);
+      const affordableWage = Math.min(wage, d.maxAffordable);
       if (affordableWage <= 0.1) continue;
       world.laborMarket.push({
         profId, assetId: d.assetId, employerId: d.employerId,
@@ -128,7 +162,7 @@ export function postWageOffers() {
 // one lucky employer's arbitrary quote — so this scan reflects genuine
 // price signals instead of noise.
 export function bestWageOffer(npc) {
-  export let best = null;
+  let best = null;
   for (const offer of world.laborMarket) {
     if (offer.employerId === npc.id) continue;
     if (offer.slotsRemaining <= 0) continue; // already fully staffed today
@@ -140,23 +174,3 @@ export function bestWageOffer(npc) {
 // (hiring decision is made directly inside buildSchedule's Pass 1, not as a separate scored action)
 
 
-// ─────────────────────────────────────────────
-// ASSET CONSTRUCTION — building a NEW asset from scratch
-// ─────────────────────────────────────────────
-//
-// Previously, asset-gated professions (miller, toolmaker, artisan) were
-// completely invisible to considerProfessionSwitch for anyone who didn't
-// already own the required asset — hasWorkableAsset returned false, so
-// computeProfessionEV short-circuited to -999 regardless of how scarce or
-// valuable that profession's output was. The ONLY path in was inheriting
-// or winning an existing asset at auction, which has nothing to do with
-// village-wide demand. This is the fix: a real, financeable construction
-// project any NPC can start, so genuine scarcity (e.g., bread) can pull
-// new capacity into existence instead of being capped by however many
-// mills happen to already exist.
-
-// Estimate the EV of "build this asset, then work it" — used so
-// considerProfessionSwitch can compare "start building a mill" against
-// staying in a current trade, on the same per-session utility footing as
-// every other option.
-export function computeConstructionEV(npc, profId) {

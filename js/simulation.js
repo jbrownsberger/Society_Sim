@@ -1,11 +1,17 @@
-import { world, logEvent } from '../core/world.js';
-import { rng } from '../config/rng.js';
-import { updateMarketPrices, runMarketExchange, distributeMarketDividends } from '../economy/market.js';
-import { runAssetAuctions } from '../economy/auctions.js';
-import { serviceDebts, collectTithes, distributeChurchAlms, distributeBankInterest } from '../economy/bankChurch.js';
-import { tickAgingAndDeaths, runMarriageMarket, tickChildren } from '../core/demographics.js';
+import { PROFESSIONS, findStructureByAssetId, findStructureByType } from './constants.js';
+import { rng } from './rng.js';
+import { TIME_USE_WINDOW, tickRelationDecay, world } from './state.js';
+import { postWageOffers } from './labor.js';
+import { considerHouseConstruction, updateAssetDistressStreaks } from './actions.js';
+import { resolveHelpRequests, runMarriageMarket, tickChildren } from './marriage.js';
+import { tickAgingAndDeaths } from './death.js';
+import { buildSchedule } from './scheduler.js';
 import { executeSchedule } from './execution.js';
-import { healStaleAssetPointers } from '../core/assets.js';
+import { satisfyNeeds } from './needs.js';
+import { runMarketExchange, updateMarketPrices } from './market.js';
+import { considerProfessionSwitch, updateMemory } from './memory.js';
+import { adaptMarketStockTargets, collectTithes, decayPerishables, distributeMarketDividends, tickCapital } from './capital.js';
+import { AUCTION_PERIOD_DAYS, distributeBankInterest, distributeChurchAlms, runAssetAuctions, serviceDebts } from './auctions.js';
 
 // ─────────────────────────────────────────────
 // MAIN SIMULATION TICK
@@ -23,7 +29,7 @@ import { healStaleAssetPointers } from '../core/assets.js';
 export function healStaleAssetPointers() {
   for (const npc of world.npcs.values()) {
     if (npc.primaryAsset === null || npc.primaryAsset === undefined) continue;
-    export const asset = world.assets.get(npc.primaryAsset);
+    const asset = world.assets.get(npc.primaryAsset);
     if (!asset || asset.ownerId !== npc.id) {
       npc.primaryAsset = null; // will surface as idle/asset-less until a new asset is assigned
     }
@@ -31,9 +37,9 @@ export function healStaleAssetPointers() {
 }
 
 export function recordTimeUse() {
-  export const dayTotals = {};
+  const dayTotals = {};
   for (const npc of world.npcs.values()) {
-    export const byAction = {};
+    const byAction = {};
     for (const action of npc.schedule) {
       byAction[action.id] = (byAction[action.id] || 0) + action.duration;
       dayTotals[action.id] = (dayTotals[action.id] || 0) + action.duration;
@@ -47,7 +53,7 @@ export function recordTimeUse() {
 
 export function tickDay() {
   world.day++;
-  export const seasonIdx = Math.floor((world.day % 360) / 90);
+  const seasonIdx = Math.floor((world.day % 360) / 90);
   world.season = ['spring','summer','autumn','winter'][seasonIdx];
 
   healStaleAssetPointers();
@@ -82,9 +88,9 @@ export function tickDay() {
   // how many go through today, and without shuffling, whoever happens
   // first in iteration order would always win any contention.
   world.switchesToday = 0;
-  export const switchOrder = [...world.npcs.values()];
+  const switchOrder = [...world.npcs.values()];
   for (let i = switchOrder.length - 1; i > 0; i--) {
-    export const j = Math.floor(rng.float(0, i + 1));
+    const j = Math.floor(rng.float(0, i + 1));
     [switchOrder[i], switchOrder[j]] = [switchOrder[j], switchOrder[i]];
   }
   for (const npc of switchOrder) considerProfessionSwitch(npc);
@@ -98,7 +104,7 @@ export function tickDay() {
 
   // Update NPC destinations for animation
   for (const npc of world.npcs.values()) {
-    export const action = npc.schedule[0];
+    const action = npc.schedule[0];
     if (action) {
       npc.currentAction = action.id;
       if (action.id.startsWith('work')) {
@@ -106,7 +112,7 @@ export function tickDay() {
         // operate (their primaryAsset's structure), not just any
         // building of the right type — matters now that several can
         // exist at once. Falls back to type-match if that lookup fails.
-        export let workBuilding = npc.primaryAsset != null
+        let workBuilding = npc.primaryAsset != null
           ? findStructureByAssetId(npc.primaryAsset)
           : null;
         if (!workBuilding && PROFESSIONS[npc.profession]?.requires) {
@@ -121,14 +127,14 @@ export function tickDay() {
         }
       } else if (action.id === 'market') {
         // Move toward market
-        export const marketBuilding = findStructureByType('market');
+        const marketBuilding = findStructureByType('market');
         if (marketBuilding) {
           npc.destX = marketBuilding.x + rng.float(-15,15);
           npc.destY = marketBuilding.y + rng.float(-15,15);
         }
       } else if (action.id === 'church') {
         // Move toward church
-        export const churchBuilding = findStructureByType('church');
+        const churchBuilding = findStructureByType('church');
         if (churchBuilding) {
           npc.destX = churchBuilding.x + rng.float(-15,15);
           npc.destY = churchBuilding.y + rng.float(-15,15);
@@ -144,3 +150,4 @@ export function tickDay() {
     }
   }
 }
+

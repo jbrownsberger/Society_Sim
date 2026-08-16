@@ -1,51 +1,9 @@
-import { world, POPULATION } from './world.js';
-import { rng } from '../config/rng.js';
-import { PROFESSIONS, FOOTPRINTS, GRID_CELL } from '../config/constants.js';
-import { prestigeTarget } from './prestige.js';
-import { createOwnedAsset, seedAssets, findFreeGridSpot, occupyGrid, nextStructureId } from './assets.js';
-
-// NAMES is intentionally a name-GENERATOR, not a fixed list. A fixed
-// array works for a static population of 16, but breaks the moment
-// anyone is born, immigrates, or otherwise joins after setup — you'd
-// run out of names. generateName() combines a first + last syllable
-// pool deterministically off the seeded RNG, so it scales to any future
-// population size and stays reproducible run-to-run.
-// NAMES: two-syllable combinations from a shared pool, deterministic off
-// the seeded RNG. Founders get two random syllables. Children inherit —
-// their name is a random combination of two of their four PARENTAL
-// syllables (two from each parent), not a fresh random draw — so family
-// names visibly echo across generations (a child might get one syllable
-// from each parent, or both from one), without ever needing a fixed
-// surname field.
-export const SYLLABLES = ['al','bram','cor','dun','ed','fenn','gun','hal','ing','jor',
-                    'kel','lor','mar','nor','os','rag','sig','thal','ul','wyn',
-                    'ber','col','dag','ew','fri','gund','helm','iv','ric','len',
-                    'mag','nora','rid','sten','thor','vald','wren','yor','frey','holt'];
-
-export function combineSyllables(s1, s2) {
-  return s1.charAt(0).toUpperCase() + s1.slice(1) + s2;
-}
-
-// Founders (no parents) — two random syllables from the shared pool.
-export function generateName(rng) {
-  export const s1 = rng.pick(SYLLABLES);
-  export let s2 = rng.pick(SYLLABLES);
-  while (s2 === s1) s2 = rng.pick(SYLLABLES); // avoid degenerate self-combos like "Alal"
-  return { name: combineSyllables(s1, s2), syllables: [s1, s2] };
-}
-
-// Children — two of the four syllables drawn from BOTH parents' names
-// (2 each), picked at random without replacement. This is the actual
-// mechanism requested: no fresh random draw from the full pool, just
-// recombination of what the parents already carry.
-export function generateChildName(motherSyllables, fatherSyllables, rng) {
-  export const pool = [...(motherSyllables || SYLLABLES.slice(0,2)), ...(fatherSyllables || SYLLABLES.slice(0,2))];
-  export const i = rng.int(0, pool.length - 1);
-  export let j = rng.int(0, pool.length - 1);
-  while (j === i) j = rng.int(0, pool.length - 1);
-  return { name: combineSyllables(pool[i], pool[j]), syllables: [pool[i], pool[j]] };
-}
-
+import { ACTIVITY_SOCIAL_CAP, ASSET_TYPES, DOG_YEAR_DAYS, FOOTPRINTS, GOODS, GRID_CELL, LABOR_DISUTILITY, MATERIAL_COMFORT_CAP, NEEDS, OLD_AGE_MAX_DOGYEARS, OLD_AGE_MIN_DOGYEARS, PROFESSIONS, allocStructureId, familyChannelTarget, findFreeGridSpot, generateName, housingQuality, occupyGrid, seedAssets } from './constants.js';
+import { rng } from './rng.js';
+import { POPULATION, world } from './state.js';
+import { MIN_BIRTH_SPACING_DAYS, graduateChild } from './marriage.js';
+import { killNPC, tickAgingAndDeaths } from './death.js';
+import { issueDebt, serviceDebts } from './auctions.js';
 
 // ─────────────────────────────────────────────
 // NPC FACTORY
@@ -65,8 +23,8 @@ export const YEAR_LENGTH = 360;              // 4×90-day seasons — matches th
 export let nextNpcId = 0;
 
 export function makeNPC(prof, x, y) {
-  export const id = nextNpcId++;
-  export const { name, syllables } = generateName(rng);
+  const id = nextNpcId++;
+  const { name, syllables } = generateName(rng);
   return {
     id, name, syllables, profession: prof,
     trainingProfession: null,   // set when switching; matches profId while ramping up
@@ -200,15 +158,15 @@ export function buildProfDist(n) {
   // guaranteed to starve from day 1 regardless of anything else. The
   // wood-price blip and the farmer exodus were real, but downstream
   // symptoms of this deeper arithmetic problem, not the root cause.
-  export const ratios = [
+  const ratios = [
     ['farmer',      4/16],
     ['woodcutter',  4/16],
     ['miller',      4/16],
     ['toolmaker',   1/16],
   ];
-  export const dist = [];
+  const dist = [];
   for (const [prof, ratio] of ratios) {
-    export const count = Math.round(n * ratio);
+    const count = Math.round(n * ratio);
     for (let i = 0; i < count; i++) dist.push(prof);
   }
   // Remainder (the old "4 flex" slots) fills out to exactly n, always as
@@ -221,12 +179,12 @@ export function buildProfDist(n) {
 // one call, so a future birth/immigration event can reuse it directly
 // instead of duplicating the angle/radius placement math inline.
 export function spawnNPC(prof) {
-  export const id = nextNpcId; // peek — makeNPC() will actually increment it
-  export const angle = (id / POPULATION) * Math.PI * 2;
-  export const r = 220 + rng.float(-40, 40); // widened from 130 to fit 3x the NPCs without overlap
-  export const x = 380 + Math.cos(angle) * r;
-  export const y = 280 + Math.sin(angle) * r;
-  export const npc = makeNPC(prof, x, y);
+  const id = nextNpcId; // peek — makeNPC() will actually increment it
+  const angle = (id / POPULATION) * Math.PI * 2;
+  const r = 220 + rng.float(-40, 40); // widened from 130 to fit 3x the NPCs without overlap
+  const x = 380 + Math.cos(angle) * r;
+  const y = 280 + Math.sin(angle) * r;
+  const npc = makeNPC(prof, x, y);
   npc.homeX = x; npc.homeY = y;
   // Founding villagers start as established young adults, not newborns —
   // spread across a range so old-age deaths (see tickAgingAndDeaths)
@@ -240,30 +198,40 @@ export function spawnNPC(prof) {
   return npc;
 }
 
+// buildProfDist(POPULATION) can't run at module top level here: POPULATION
+// (from state.js) isn't guaranteed initialized yet given this file's spot
+// in the import cycle. Computed lazily inside initWorld() instead.
+export let profDist;
 
-export function spawnInitialNPCs() {
-  export const profDist = buildProfDist(POPULATION);
-  for (let i = 0; i < POPULATION; i++) {
-    spawnNPC(profDist[i]);
-  }
-  createInstitutionStructure('market', 'Market');
-  createInstitutionStructure('well', 'Well');
-  createInstitutionStructure('church', 'Church');
-  seedAssets();
-}
-
+// Village institutions (Market, Well, Church) aren't owned by any NPC and
+// have no backing economic asset — just a structure record so they show
+// up on the map and can be found by type like anything else.
 export function createInstitutionStructure(type, label) {
-  export const footprint = FOOTPRINTS[type] ?? 1;
-  export const { gx, gy } = findFreeGridSpot(footprint);
+  const footprint = FOOTPRINTS[type] ?? 1;
+  const { gx, gy } = findFreeGridSpot(footprint);
   occupyGrid(gx, gy, footprint);
-  export const structure = {
-    id: nextStructureId++, type, assetId: null, ownerId: null,
+  const structure = {
+    id: allocStructureId(), type, assetId: null, ownerId: null,
     gx, gy, footprint, x: gx * GRID_CELL, y: gy * GRID_CELL, label,
     history: [{ day: world.day, event: 'built', ownerId: null }],
   };
   world.structures.set(structure.id, structure);
   return structure;
 }
-createInstitutionStructure('market', 'Market');
-createInstitutionStructure('well', 'Well');
-createInstitutionStructure('church', 'Church');
+// Runs the actual world/population seeding side effects. Called once from
+// main.js after every module has finished loading, so that cyclic imports
+// (e.g. this file needing POPULATION from state.js, or BANK_INITIAL_RESERVE
+// in auctions.js needing world from state.js) are all fully initialized
+// before anything reads them.
+export function initWorld() {
+  profDist = buildProfDist(POPULATION);
+  for (let i = 0; i < POPULATION; i++) {
+    spawnNPC(profDist[i]);
+  }
+  createInstitutionStructure('market', 'Market');
+  createInstitutionStructure('well', 'Well');
+  createInstitutionStructure('church', 'Church');
+
+  seedAssets(); // give every asset-gated starting profession its matching farm/mill/forge/workshop, plus a house for everyone
+}
+

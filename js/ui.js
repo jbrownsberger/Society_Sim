@@ -1,49 +1,45 @@
-import { world } from '../core/world.js';
-import { GOODS, PROFESSIONS, ASSET_TYPES, BUILDING_PRODUCTIVITY } from '../config/constants.js';
-import { drawScene } from './renderer.js';
-import { effectiveSkill } from '../simulation/actions.js';
-
-export let selectedNPC = null;
-export let selectedStructure = null;
-
-export function setSelectedNPC(npc) { selectedNPC = npc; }
-export function setSelectedStructure(struct) { selectedStructure = struct; }
+import { ASSET_TYPES, BUILDING_PRODUCTIVITY, DOG_YEAR_DAYS, GOODS, MAX_FARMS, NEEDS, PROFESSIONS, countAssetsOfType, findStructureByAssetId, hasWorkableAsset, housingQuality } from './constants.js';
+import { world } from './state.js';
+import { expectedPrice, lambda, scoreAction } from './prices.js';
+import { CONSTRUCTION_HOURS_PER_DAY, computeConstructionEV } from './construction.js';
+import { getAvailableActions } from './death.js';
+import { canvas } from './render.js';
+import { switchToInspector } from './main.js';
 
 // ─────────────────────────────────────────────
 // UI PANELS
 // ─────────────────────────────────────────────
 
-export let selectedNPC = null;
-export let selectedStructure = null;
+export const selection = { npc: null, structure: null };
 
 export function updateUI() {
   document.getElementById('day-display').textContent = world.day;
   document.getElementById('pop-display').textContent = world.npcs.size;
 
-  export const seasonEl = document.getElementById('season-display');
+  const seasonEl = document.getElementById('season-display');
   seasonEl.textContent = world.season.charAt(0).toUpperCase() + world.season.slice(1);
-  export const sColors = { spring:'#5a7a3a', summer:'#8b8b2a', autumn:'#8b5a2a', winter:'#4a6a8a' };
+  const sColors = { spring:'#5a7a3a', summer:'#8b8b2a', autumn:'#8b5a2a', winter:'#4a6a8a' };
   seasonEl.style.background = sColors[world.season];
   seasonEl.style.color = '#f2e8d5';
   seasonEl.style.padding = '2px 8px';
 
   // Market grid
-  export const divStatus = document.getElementById('market-dividend-status');
-  export const visitCount = world.market.visitorsToday.length;
+  const divStatus = document.getElementById('market-dividend-status');
+  const visitCount = world.market.visitorsToday.length;
   divStatus.textContent = visitCount > 0
     ? `${visitCount} at market today · paid out ${world.market.dividendPoolToday.toFixed(0)}¢ · ~${world.market.lastDividendPerVisitHour.toFixed(2)}¢/hr going rate`
     : `Nobody at market today · ~${world.market.lastDividendPerVisitHour.toFixed(2)}¢/hr going rate`;
 
-  export const mg = document.getElementById('market-grid');
+  const mg = document.getElementById('market-grid');
   mg.innerHTML = '';
   for (const [good, data] of Object.entries(GOODS)) {
-    export const g = world.market.goods[good];
-    export const hist = g.priceHistory;
-    export const price = g.midPrice.toFixed(1);
-    export const prevEntry = hist.length > 1 ? hist[hist.length-2].price : g.midPrice;
-    export const trend = g.midPrice > prevEntry ? '▲' : g.midPrice < prevEntry ? '▼' : '–';
-    export const trendColor = g.midPrice > prevEntry ? '#c0392b' : '#27ae60';
-    export const unmet = (g.unmetDemand > 0.1 ? `short ${g.unmetDemand.toFixed(1)}` :
+    const g = world.market.goods[good];
+    const hist = g.priceHistory;
+    const price = g.midPrice.toFixed(1);
+    const prevEntry = hist.length > 1 ? hist[hist.length-2].price : g.midPrice;
+    const trend = g.midPrice > prevEntry ? '▲' : g.midPrice < prevEntry ? '▼' : '–';
+    const trendColor = g.midPrice > prevEntry ? '#c0392b' : '#27ae60';
+    const unmet = (g.unmetDemand > 0.1 ? `short ${g.unmetDemand.toFixed(1)}` :
                    g.unmetSupply > 0.1 ? `glut ${g.unmetSupply.toFixed(1)}` : 'balanced');
     mg.innerHTML += `
       <div class="market-item">
@@ -57,15 +53,15 @@ export function updateUI() {
   drawSparklines();
 
   // NPC list
-  export const nl = document.getElementById('npc-list');
+  const nl = document.getElementById('npc-list');
   nl.innerHTML = '';
   for (const npc of world.npcs.values()) {
-    export const div = document.createElement('div');
-    div.className = 'npc-item' + (selectedNPC===npc.id?' selected':'');
-    div.onclick = () => { selectedNPC = npc.id; selectedStructure = null; updateUI(); switchToInspector(); };
+    const div = document.createElement('div');
+    div.className = 'npc-item' + (selection.npc===npc.id?' selected':'');
+    div.onclick = () => { selection.npc = npc.id; selection.structure = null; updateUI(); switchToInspector(); };
 
-    export const needsHTML = Object.entries(npc.needs).map(([need,val])=>{
-      export const colors = { food:'#e74c3c', security:'#f39c12', comfort:'#a5478b', social:'#9b59b6', meaning:'#3498db', prestige:'#c9962c' };
+    const needsHTML = Object.entries(npc.needs).map(([need,val])=>{
+      const colors = { food:'#e74c3c', security:'#f39c12', comfort:'#a5478b', social:'#9b59b6', meaning:'#3498db', prestige:'#c9962c' };
       return `<div class="needs-bar-row">
         <span class="needs-bar-label">${need}</span>
         <div class="needs-bar-bg">
@@ -75,8 +71,8 @@ export function updateUI() {
       </div>`;
     }).join('');
 
-    export const spouse = npc.spouseId != null ? world.npcs.get(npc.spouseId) : null;
-    export const familyLine = spouse ? `💍 ${spouse.name}${npc.childIds.length ? ` · ${npc.childIds.length} kid${npc.childIds.length>1?'s':''}` : ''}` : '';
+    const spouse = npc.spouseId != null ? world.npcs.get(npc.spouseId) : null;
+    const familyLine = spouse ? `💍 ${spouse.name}${npc.childIds.length ? ` · ${npc.childIds.length} kid${npc.childIds.length>1?'s':''}` : ''}` : '';
 
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -91,11 +87,11 @@ export function updateUI() {
   }
 
   // Inspector
-  if (selectedStructure !== null) {
-    export const s = world.structures.get(selectedStructure);
+  if (selection.structure !== null) {
+    const s = world.structures.get(selection.structure);
     if (s) drawStructureInspector(s);
-  } else if (selectedNPC !== null) {
-    export const npc = world.npcs.get(selectedNPC);
+  } else if (selection.npc !== null) {
+    const npc = world.npcs.get(selection.npc);
     if (npc) drawInspector(npc);
   }
 
@@ -104,27 +100,27 @@ export function updateUI() {
   updateDemographics();
 
   // Event log
-  export const logEl = document.getElementById('event-log');
+  const logEl = document.getElementById('event-log');
   logEl.innerHTML = world.eventLog.slice(0,12).map(e=>
     `<div class="log-entry"><span class="day-tag">Day ${e.day}</span>${e.text}</div>`
   ).join('');
 }
 
 export function updateDemographics() {
-  export const el = document.getElementById('demographics-status');
+  const el = document.getElementById('demographics-status');
   if (!el) return;
 
-  export const npcs = [...world.npcs.values()];
-  export const n = npcs.length;
-  export const marriedCount = npcs.filter(p => p.spouseId != null).length;
-  export const householdsWithKids = npcs.filter(p => p.spouseId != null && p.id < p.spouseId && p.childIds.length > 0).length;
-  export const couples = npcs.filter(p => p.spouseId != null && p.id < p.spouseId).length;
-  export const totalKids = world.children.size;
-  export const avgKidsPerCouple = couples > 0
+  const npcs = [...world.npcs.values()];
+  const n = npcs.length;
+  const marriedCount = npcs.filter(p => p.spouseId != null).length;
+  const householdsWithKids = npcs.filter(p => p.spouseId != null && p.id < p.spouseId && p.childIds.length > 0).length;
+  const couples = npcs.filter(p => p.spouseId != null && p.id < p.spouseId).length;
+  const totalKids = world.children.size;
+  const avgKidsPerCouple = couples > 0
     ? (npcs.reduce((s,p) => s + (p.spouseId != null && p.id < p.spouseId ? p.childIds.length : 0), 0) / couples)
     : 0;
-  export const homelessCount = npcs.filter(p => housingQuality(p) < 1.0).length;
-  export const farmCount = countAssetsOfType('farm');
+  const homelessCount = npcs.filter(p => housingQuality(p) < 1.0).length;
+  const farmCount = countAssetsOfType('farm');
 
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:0.78rem">
@@ -142,23 +138,23 @@ export function updateDemographics() {
 }
 
 export function drawSparklines() {
-  export const sc = document.getElementById('sparkline-canvas');
-  export const sx = sc.getContext('2d');
+  const sc = document.getElementById('sparkline-canvas');
+  const sx = sc.getContext('2d');
   sx.clearRect(0,0,sc.width,sc.height);
 
-  export const goods = Object.keys(GOODS);
-  export const colors = ['#c8a84b','#c47a3a','#7a5a3a','#808080','#a5478b'];
-  export const rowH = sc.height / goods.length;
+  const goods = Object.keys(GOODS);
+  const colors = ['#c8a84b','#c47a3a','#7a5a3a','#808080','#a5478b'];
+  const rowH = sc.height / goods.length;
 
   goods.forEach((good,i) => {
-    export const raw = world.market.goods[good].priceHistory.slice(-50);
+    const raw = world.market.goods[good].priceHistory.slice(-50);
     if (raw.length < 2) return;
-    export const hist = raw.map(e => e.price);
+    const hist = raw.map(e => e.price);
 
-    export const y0 = i * rowH + 4;
-    export const h  = rowH - 8;
-    export const mn = Math.min(...hist) * 0.9;
-    export const mx = Math.max(...hist) * 1.1;
+    const y0 = i * rowH + 4;
+    const h  = rowH - 8;
+    const mn = Math.min(...hist) * 0.9;
+    const mx = Math.max(...hist) * 1.1;
 
     // Label
     sx.fillStyle = '#6b4c3b';
@@ -171,14 +167,14 @@ export function drawSparklines() {
     sx.strokeStyle = colors[i];
     sx.lineWidth = 1.5;
     hist.forEach((p,j) => {
-      export const x = 65 + (j / (hist.length-1)) * (sc.width - 70);
-      export const y = y0 + h - ((p - mn) / (mx - mn)) * h;
+      const x = 65 + (j / (hist.length-1)) * (sc.width - 70);
+      const y = y0 + h - ((p - mn) / (mx - mn)) * h;
       j===0 ? sx.moveTo(x,y) : sx.lineTo(x,y);
     });
     sx.stroke();
 
     // Current price
-    export const last = hist[hist.length-1].toFixed(1);
+    const last = hist[hist.length-1].toFixed(1);
     sx.fillStyle = colors[i];
     sx.textAlign = 'right';
     sx.fillText(last, sc.width-2, y0+h/2+4);
@@ -186,35 +182,35 @@ export function drawSparklines() {
 }
 
 export function drawStructureInspector(s) {
-  export const el = document.getElementById('inspector');
+  const el = document.getElementById('inspector');
   if (!el) return;
 
-  export const owner = s.ownerId != null ? world.npcs.get(s.ownerId) : null;
-  export const asset = s.assetId != null ? world.assets.get(s.assetId) : null;
+  const owner = s.ownerId != null ? world.npcs.get(s.ownerId) : null;
+  const asset = s.assetId != null ? world.assets.get(s.assetId) : null;
 
-  export const workerNames = (asset?.employedLaborIds ?? [])
+  const workerNames = (asset?.employedLaborIds ?? [])
     .map(id => world.npcs.get(id)?.name).filter(Boolean);
 
   // For houses specifically: who actually LIVES here, not just who owns
   // it — includes a spouse who moved in (their own primaryHouse was
   // nulled out at marriage, see marryCouple) and any of their children.
-  export let householdHtml = '';
+  let householdHtml = '';
   if (s.type === 'house' && owner) {
-    export const residents = [owner];
+    const residents = [owner];
     if (owner.spouseId != null) {
-      export const spouse = world.npcs.get(owner.spouseId);
+      const spouse = world.npcs.get(owner.spouseId);
       if (spouse && spouse.primaryHouse == null) residents.push(spouse); // moved in, not a separate homeowner
     }
-    export const kids = residents.flatMap(r => r.childIds.map(id => world.children.get(id)).filter(Boolean));
-    export const uniqueKids = [...new Map(kids.map(k => [k.id, k])).values()];
+    const kids = residents.flatMap(r => r.childIds.map(id => world.children.get(id)).filter(Boolean));
+    const uniqueKids = [...new Map(kids.map(k => [k.id, k])).values()];
     householdHtml = `<div style="font-size:0.72rem;margin:4px 0">
       <b>Household:</b> ${residents.map(r => r.name).join(' & ')}${uniqueKids.length ? `, ${uniqueKids.map(c=>c.name).join(', ')} (${uniqueKids.length} child${uniqueKids.length>1?'ren':''})` : ''}
     </div>`;
   }
 
-  export const historyRows = s.history.slice().reverse().map(h => {
-    export const label = h.event === 'built' ? 'Built' : h.event === 'sold' ? 'Sold' : h.event;
-    export const who = h.event === 'built'
+  const historyRows = s.history.slice().reverse().map(h => {
+    const label = h.event === 'built' ? 'Built' : h.event === 'sold' ? 'Sold' : h.event;
+    const who = h.event === 'built'
       ? (world.npcs.get(h.ownerId)?.name ?? 'the village')
       : `${world.npcs.get(h.fromId)?.name ?? '—'} → ${world.npcs.get(h.toId)?.name ?? '—'}`;
     return `<div style="font-size:0.72rem;display:flex;justify-content:space-between">
@@ -223,7 +219,7 @@ export function drawStructureInspector(s) {
     </div>`;
   }).join('');
 
-  export const details = ASSET_TYPES[s.type] ? `
+  const details = ASSET_TYPES[s.type] ? `
     <div style="font-size:0.72rem;color:var(--ink-faded);margin:2px 0">
       Quality: ${(asset?.quality ?? 1).toFixed(2)} ·
       Capacity: ${asset?.capacity ?? 1} ·
@@ -245,10 +241,10 @@ export function drawStructureInspector(s) {
 }
 
 export function drawInspector(npc) {
-  export const el = document.getElementById('inspector');
-  export const lam = lambda(npc).toFixed(2);
+  const el = document.getElementById('inspector');
+  const lam = lambda(npc).toFixed(2);
 
-  export const invStr = Object.entries(npc.inventory)
+  const invStr = Object.entries(npc.inventory)
     .map(([g,q])=>`${g}: ${q.toFixed(1)}`).join(' · ');
 
   // Time-use breakdown: average hours/day per action over the NPC's
@@ -256,25 +252,25 @@ export function drawInspector(npc) {
   // rather than just today's single schedule — smooths out day-to-day
   // noise (e.g. one tinkering day) so the shape reflects an actual
   // recent pattern.
-  export const recentDays = npc.timeUseHistory.slice(-14);
-  export const avgByAction = {};
+  const recentDays = npc.timeUseHistory.slice(-14);
+  const avgByAction = {};
   for (const day of recentDays) {
     for (const [id, hrs] of Object.entries(day.byAction)) {
       avgByAction[id] = (avgByAction[id] || 0) + hrs;
     }
   }
   for (const id of Object.keys(avgByAction)) avgByAction[id] /= Math.max(1, recentDays.length);
-  export const timeUseHtml = renderTimeUseBar(avgByAction);
+  const timeUseHtml = renderTimeUseBar(avgByAction);
 
-  export const evRows = Object.entries(npc.memory.ev).map(([profId,ev])=>{
-    export const isCurrent = profId === npc.profession;
-    export const prof = PROFESSIONS[profId];
+  const evRows = Object.entries(npc.memory.ev).map(([profId,ev])=>{
+    const isCurrent = profId === npc.profession;
+    const prof = PROFESSIONS[profId];
     // Build a compact signal string: "bread×3→8.2 grain×2→3.1" etc.
-    export let signal = '';
+    let signal = '';
     if (prof) {
-      export const outParts = Object.entries(prof.outputs).map(([g,q])=>
+      const outParts = Object.entries(prof.outputs).map(([g,q])=>
         `${GOODS[g].name}×${q}→${expectedPrice(npc,g).toFixed(1)}`);
-      export const inParts  = Object.entries(prof.inputs).map(([g,q])=>
+      const inParts  = Object.entries(prof.inputs).map(([g,q])=>
         `${GOODS[g].name}×${q}←${expectedPrice(npc,g).toFixed(1)}`);
       signal = [...outParts,...inParts].join(' ');
       if (!hasWorkableAsset(npc, profId)) {
@@ -282,7 +278,7 @@ export function drawInspector(npc) {
         // one from scratch would be worth, since that's now a real,
         // player-visible option rather than a dead end (⛔ used to be the
         // whole story here; it no longer is).
-        export const cev = computeConstructionEV(npc, profId);
+        const cev = computeConstructionEV(npc, profId);
         signal = cev > -900 ? `🔨 build: ${cev.toFixed(1)}` : '⛔ no asset, not worth building';
       }
     }
@@ -296,27 +292,27 @@ export function drawInspector(npc) {
   // In-progress construction gets its own prominent banner — this is a
   // multi-week commitment the NPC is mid-way through, worth surfacing
   // clearly rather than burying it in the EV table.
-  export const constructionBanner = npc.constructionProject ? `
+  const constructionBanner = npc.constructionProject ? `
     <div style="background:var(--parchment-dark,#e8dcc0);border:1px solid #5A3E9E;border-radius:4px;padding:6px;margin-bottom:6px;font-size:0.75rem">
       🔨 Building a ${ASSET_TYPES[npc.constructionProject.assetType].name.toLowerCase()} —
       ${(npc.constructionProject.laborHoursDone / CONSTRUCTION_HOURS_PER_DAY).toFixed(1)}/${(npc.constructionProject.laborHoursNeeded / CONSTRUCTION_HOURS_PER_DAY).toFixed(0)} labor-days
     </div>` : '';
 
   // Action scores for today
-  export const actions = getAvailableActions(npc);
-  export const scored = actions.map(a=>({...a,score:scoreAction(a,npc)}))
+  const actions = getAvailableActions(npc);
+  const scored = actions.map(a=>({...a,score:scoreAction(a,npc)}))
                         .sort((a,b)=>b.score-a.score).slice(0,5);
-  export const actionRows = scored.map(a=>
+  const actionRows = scored.map(a=>
     `<tr><td>${a.label}</td><td>${a.score.toFixed(2)}</td></tr>`
   ).join('');
 
   // Family — spouse, children (with age in days -> nearest "year" at
   // 360 days/year, matching how CHILDHOOD_DAYS is denominated), and
   // current housing status (see housingQuality's spousal fallback).
-  export const spouse = npc.spouseId != null ? world.npcs.get(npc.spouseId) : null;
-  export const kids = npc.childIds.map(id => world.children.get(id)).filter(Boolean);
-  export const housed = housingQuality(npc) >= 1.0;
-  export const familySection = `
+  const spouse = npc.spouseId != null ? world.npcs.get(npc.spouseId) : null;
+  const kids = npc.childIds.map(id => world.children.get(id)).filter(Boolean);
+  const housed = housingQuality(npc) >= 1.0;
+  const familySection = `
     <div style="font-size:0.75rem;margin-bottom:6px;padding:6px;background:var(--parchment-dark,#e8dcc0);border-radius:4px">
       <div style="font-style:italic;color:var(--ink-faded);margin-bottom:2px">Family</div>
       ${spouse ? `Married to <b>${spouse.name}</b> (${PROFESSIONS[spouse.profession]?.name ?? spouse.profession})` : 'Unmarried'}
@@ -324,10 +320,10 @@ export function drawInspector(npc) {
       <br><span style="${housed?'':'color:#8b3a1a'}">${housed ? '🏠 Housed' : '⛺ Homeless — see housing status'}</span>
     </div>`;
 
-  export const needsHTML = Object.entries(npc.needs).map(([need,val])=>{
-    export const colors = { food:'#e74c3c', security:'#f39c12', comfort:'#a5478b', social:'#9b59b6', meaning:'#3498db', prestige:'#c9962c' };
-    export const cfg = NEEDS[need];
-    export const critical = cfg?.critical && cfg.starvationFloor > 0 && val < cfg.starvationFloor;
+  const needsHTML = Object.entries(npc.needs).map(([need,val])=>{
+    const colors = { food:'#e74c3c', security:'#f39c12', comfort:'#a5478b', social:'#9b59b6', meaning:'#3498db', prestige:'#c9962c' };
+    const cfg = NEEDS[need];
+    const critical = cfg?.critical && cfg.starvationFloor > 0 && val < cfg.starvationFloor;
     return `<div class="needs-bar-row">
       <span class="needs-bar-label">${need}${critical ? ' ⚠️' : ''}</span>
       <div class="needs-bar-bg">
@@ -341,8 +337,8 @@ export function drawInspector(npc) {
   // global world.eventLog everyone else reads (see logEvent), not a
   // separate per-NPC log to maintain. Most recent first, capped so the
   // panel doesn't grow unbounded for a long-lived, event-heavy NPC.
-  export const npcEvents = world.eventLog.filter(e => e.npcIds && e.npcIds.includes(npc.id)).slice(0, 8);
-  export const npcEventsHtml = npcEvents.length
+  const npcEvents = world.eventLog.filter(e => e.npcIds && e.npcIds.includes(npc.id)).slice(0, 8);
+  const npcEventsHtml = npcEvents.length
     ? npcEvents.map(e => `<div style="margin-bottom:2px"><span style="color:var(--ink-faded)">Day ${e.day}:</span> ${e.text}</div>`).join('')
     : `<div style="color:var(--ink-faded);font-style:italic">Nothing notable yet.</div>`;
 
@@ -351,27 +347,27 @@ export function drawInspector(npc) {
   // tail of near-zero acquaintances. Capped to the top handful for
   // readability; the full sparse map can be much larger for a
   // well-connected old NPC.
-  export const relRows = [...npc.relations.entries()]
+  const relRows = [...npc.relations.entries()]
     .sort((a, b) => Math.abs(b[1].affinity) - Math.abs(a[1].affinity))
     .slice(0, 8)
     .map(([id, rec]) => {
-      export const other = world.npcs.get(id);
+      const other = world.npcs.get(id);
       if (!other) return '';
-      export const color = rec.affinity > 0 ? '#2e7d32' : (rec.affinity < 0 ? '#8b3a1a' : 'var(--ink-faded)');
-      export const label = rec.affinity > 0.5 ? 'devoted' : rec.affinity > 0.15 ? 'fond' : rec.affinity < -0.5 ? 'hateful' : rec.affinity < -0.15 ? 'resentful' : 'neutral';
+      const color = rec.affinity > 0 ? '#2e7d32' : (rec.affinity < 0 ? '#8b3a1a' : 'var(--ink-faded)');
+      const label = rec.affinity > 0.5 ? 'devoted' : rec.affinity > 0.15 ? 'fond' : rec.affinity < -0.5 ? 'hateful' : rec.affinity < -0.15 ? 'resentful' : 'neutral';
       return `<div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:1px">
         <span>${other.name}</span>
         <span style="color:${color}">${rec.affinity>=0?'+':''}${rec.affinity.toFixed(2)} (${label})</span>
       </div>`;
     }).join('');
-  export const relationsHtml = relRows || `<div style="color:var(--ink-faded);font-style:italic;font-size:0.72rem">No relationships yet.</div>`;
+  const relationsHtml = relRows || `<div style="color:var(--ink-faded);font-style:italic;font-size:0.72rem">No relationships yet.</div>`;
 
   // Owned buildings — cross-references world.structures by ownedAssets,
   // same asset ids the inheritance/auction systems already key off.
-  export const ownedStructures = npc.ownedAssets
+  const ownedStructures = npc.ownedAssets
     .map(assetId => findStructureByAssetId(assetId))
     .filter(Boolean);
-  export const ownedHtml = ownedStructures.length
+  const ownedHtml = ownedStructures.length
     ? ownedStructures.map(s => `<div style="font-size:0.72rem">${ASSET_TYPES[s.type]?.name ?? s.type}${s.type===npc.primaryHouse?' 🏠':''}</div>`).join('')
     : `<div style="color:var(--ink-faded);font-style:italic;font-size:0.72rem">Owns no buildings.</div>`;
 
@@ -443,7 +439,7 @@ export function drawInspector(npc) {
 
 export function setBuildingProductivity(type, value) {
   BUILDING_PRODUCTIVITY[type] = parseFloat(value);
-  export const label = document.getElementById('prod-label-' + type);
+  const label = document.getElementById('prod-label-' + type);
   if (label) label.textContent = parseFloat(value).toFixed(2) + 'x';
 }
 
@@ -459,17 +455,17 @@ export const TIME_USE_COLORS = {
 };
 
 export function renderTimeUseBar(byAction, totalHoursOverride) {
-  export const total = totalHoursOverride ?? Object.values(byAction).reduce((s,v)=>s+v,0);
+  const total = totalHoursOverride ?? Object.values(byAction).reduce((s,v)=>s+v,0);
   if (total <= 0) return '<div style="font-size:0.7rem;color:var(--ink-faded)">No data yet.</div>';
-  export const entries = Object.entries(byAction).sort((a,b)=>b[1]-a[1]);
-  export const segments = entries.map(([id,hrs]) => {
-    export const pct = (hrs/total*100);
-    export const color = TIME_USE_COLORS[id] || '#999';
+  const entries = Object.entries(byAction).sort((a,b)=>b[1]-a[1]);
+  const segments = entries.map(([id,hrs]) => {
+    const pct = (hrs/total*100);
+    const color = TIME_USE_COLORS[id] || '#999';
     return `<div style="width:${pct}%;background:${color}" title="${TIME_USE_LABELS[id]||id}: ${hrs.toFixed(1)}h"></div>`;
   }).join('');
-  export const legend = entries.map(([id,hrs]) => {
-    export const pct = (hrs/total*100).toFixed(0);
-    export const color = TIME_USE_COLORS[id] || '#999';
+  const legend = entries.map(([id,hrs]) => {
+    const pct = (hrs/total*100).toFixed(0);
+    const color = TIME_USE_COLORS[id] || '#999';
     return `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;font-size:0.68rem;color:var(--ink-faded)">
       <span style="width:8px;height:8px;background:${color};border-radius:2px;display:inline-block"></span>
       ${TIME_USE_LABELS[id]||id} ${pct}%
@@ -481,17 +477,17 @@ export function renderTimeUseBar(byAction, totalHoursOverride) {
 }
 
 export function updateTimeUsePanel() {
-  export const el = document.getElementById('time-use-aggregate');
+  const el = document.getElementById('time-use-aggregate');
   if (!el) return;
-  export const latest = world.timeUseHistory[world.timeUseHistory.length - 1];
+  const latest = world.timeUseHistory[world.timeUseHistory.length - 1];
   if (!latest) { el.innerHTML = '<div style="font-size:0.7rem;color:var(--ink-faded)">No data yet.</div>'; return; }
   el.innerHTML = renderTimeUseBar(latest.byAction);
 }
 
 export function updateInfraPanel() {
-  export const el = document.getElementById('infra-status');
+  const el = document.getElementById('infra-status');
   if (!el) return;
-  export const all = [
+  const all = [
     { type:'mill',     label:'Mill',     unlocks:'Miller' },
     { type:'forge',    label:'Forge',    unlocks:'Toolmaker' },
     { type:'workshop', label:'Workshop', unlocks:'Artisan' },
@@ -505,22 +501,22 @@ export function updateInfraPanel() {
   // village-wide. The player can no longer place buildings directly, but
   // can still tune realized productivity via the sliders below, same as
   // before.
-  export const assetCounts = {};
+  const assetCounts = {};
   for (const asset of world.assets.values()) {
     assetCounts[asset.type] = (assetCounts[asset.type] || 0) + 1;
   }
-  export const inProgress = [...world.npcs.values()]
+  const inProgress = [...world.npcs.values()]
     .filter(n => n.constructionProject)
     .map(n => ({ npc: n, proj: n.constructionProject }));
 
-  export const rows = all.map(s => {
-    export const count = assetCounts[s.type] ?? ([...world.structures.values()].some(b => b.type === s.type) ? 1 : 0);
-    export const built = count > 0;
-    export const icon = built ? '✔' : '✘';
-    export const color = built ? '#5a7a3a' : '#8b3a1a';
-    export const countNote = s.type !== 'market' ? ` <span style="color:var(--ink-faded)">(${count} in use)</span>` : '';
-    export const hasSlider = built && BUILDING_PRODUCTIVITY[s.type] !== undefined;
-    export const slider = hasSlider ? `
+  const rows = all.map(s => {
+    const count = assetCounts[s.type] ?? ([...world.structures.values()].some(b => b.type === s.type) ? 1 : 0);
+    const built = count > 0;
+    const icon = built ? '✔' : '✘';
+    const color = built ? '#5a7a3a' : '#8b3a1a';
+    const countNote = s.type !== 'market' ? ` <span style="color:var(--ink-faded)">(${count} in use)</span>` : '';
+    const hasSlider = built && BUILDING_PRODUCTIVITY[s.type] !== undefined;
+    const slider = hasSlider ? `
       <div style="display:flex;align-items:center;gap:6px;margin:2px 0 8px 0">
         <input type="range" min="0.2" max="2.0" step="0.05"
           value="${BUILDING_PRODUCTIVITY[s.type]}"
@@ -537,7 +533,7 @@ export function updateInfraPanel() {
     </div>`;
   }).join('');
 
-  export const projectRows = inProgress.length > 0 ? `
+  const projectRows = inProgress.length > 0 ? `
     <div style="margin-top:8px;padding-top:6px;border-top:1px solid #6b4c3b">
       <div style="font-size:0.7rem;font-style:italic;color:var(--ink-faded);margin-bottom:3px">Under construction</div>
       ${inProgress.map(({npc,proj}) => `
@@ -549,3 +545,5 @@ export function updateInfraPanel() {
 
   el.innerHTML = rows + projectRows;
 }
+
+

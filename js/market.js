@@ -1,5 +1,9 @@
-import { world, logEvent } from '../core/world.js';
-import { GOODS, PRICE_ELASTICITY, PRICE_ADJUST_RATE } from '../config/constants.js';
+import { clamp } from './utils.js';
+import { GOODS, PROFESSIONS } from './constants.js';
+import { rng } from './rng.js';
+import { PRICE_ADJUST_RATE, PRICE_ELASTICITY, world } from './state.js';
+import { marketAsk } from './prices.js';
+import { effectiveSkill, getBufferTarget } from './death.js';
 
 // ─────────────────────────────────────────────
 // THE MARKET — institutional bid/ask trading
@@ -23,8 +27,8 @@ import { GOODS, PRICE_ELASTICITY, PRICE_ADJUST_RATE } from '../config/constants.
 // a hard wall of zero stock. Scarcity gets rationed by price, the way the
 // rest of this game's economics already works, instead of by queue order.
 export function priceForStock(good, stock) {
-  export const g = world.market.goods[good];
-  export const base = GOODS[good].baseValue;
+  const g = world.market.goods[good];
+  const base = GOODS[good].baseValue;
   // BUG FIX: the old -0.95 floor on `dev` meant that once stock hit zero
   // (a full stockout), the price computation saturated at a FIXED ceiling
   // and could rise no further, no matter how severe or prolonged the
@@ -43,9 +47,9 @@ export function priceForStock(good, stock) {
   // PRICE_ELASTICITY=0.6, vs the old ~1.77x cap) so genuine, sustained
   // scarcity can actually clear the market by attracting producers,
   // instead of being invisible to the price signal.
-  export const scarcityBoost = g.unmetDemand / Math.max(1, g.targetStock);
-  export const rawDev = (stock - g.targetStock) / g.targetStock - scarcityBoost;
-  export const dev = clamp(rawDev, -3, 5);
+  const scarcityBoost = g.unmetDemand / Math.max(1, g.targetStock);
+  const rawDev = (stock - g.targetStock) / g.targetStock - scarcityBoost;
+  const dev = clamp(rawDev, -3, 5);
   return base * Math.exp(-PRICE_ELASTICITY * dev);
 }
 
@@ -65,8 +69,8 @@ export function priceForStock(good, stock) {
 export const TRADE_PRICE_IMPACT = 0.25;
 
 export function repriceGood(good) {
-  export const g = world.market.goods[good];
-  export const rawTarget = priceForStock(good, g.stock);
+  const g = world.market.goods[good];
+  const rawTarget = priceForStock(good, g.stock);
   g.midPrice = g.midPrice * (1 - TRADE_PRICE_IMPACT) + rawTarget * TRADE_PRICE_IMPACT;
   g.bidPrice = g.midPrice * (1 - g.spread / 2);
   g.askPrice = g.midPrice * (1 + g.spread / 2);
@@ -74,8 +78,8 @@ export function repriceGood(good) {
 
 export function updateMarketPrices() {
   for (const good of Object.keys(GOODS)) {
-    export const g = world.market.goods[good];
-    export const targetMid = priceForStock(good, g.stock);
+    const g = world.market.goods[good];
+    const targetMid = priceForStock(good, g.stock);
 
     // Smooth toward the target rather than snapping — this is the
     // *opening* price for the day, so some inertia from yesterday's
@@ -100,7 +104,7 @@ export function runMarketExchange() {
   // dawn ritual. Skipping market means no buying, no selling, and no
   // dividend share today; surplus goods just sit in inventory and deficits
   // go unmet until the next visit.
-  export const attendees = [...world.npcs.values()]
+  const attendees = [...world.npcs.values()]
     .map(npc => ({ npc, visit: npc.schedule.find(a => a.id === 'market') }))
     .filter(({ visit }) => visit);
 
@@ -108,44 +112,44 @@ export function runMarketExchange() {
 
   // Randomize trade order each day so no NPC has a systematic first-mover
   // advantage over the Market's limited stock/cash.
-  export const npcOrder = attendees.map(({ npc }) => npc);
+  const npcOrder = attendees.map(({ npc }) => npc);
   for (let i = npcOrder.length - 1; i > 0; i--) {
-    export const j = Math.floor(rng.float(0, i + 1));
+    const j = Math.floor(rng.float(0, i + 1));
     [npcOrder[i], npcOrder[j]] = [npcOrder[j], npcOrder[i]];
   }
 
   for (const npc of npcOrder) {
     for (const good of Object.keys(GOODS)) {
-      export const g = world.market.goods[good];
-      export const have    = npc.inventory[good] ?? 0;
-      export const target  = getBufferTarget(npc, good);
-      export const surplus = have - target;
-      export const deficit = target - have;
+      const g = world.market.goods[good];
+      const have    = npc.inventory[good] ?? 0;
+      const target  = getBufferTarget(npc, good);
+      const surplus = have - target;
+      const deficit = target - have;
 
       // ── SELL to the Market (npc → Market, at the bid) ──────────────
       if (surplus > 0.1) {
         // Cost-based floor: an NPC won't dump goods below what it cost to
         // make them. If the Market's bid is under floor, the NPC just
         // holds the surplus instead of selling at a loss.
-        export const prof = PROFESSIONS[npc.profession];
-        export let costFloor = GOODS[good].baseValue * 0.4;
+        const prof = PROFESSIONS[npc.profession];
+        let costFloor = GOODS[good].baseValue * 0.4;
         if (prof && prof.outputs[good] && Object.keys(prof.inputs).length > 0) {
-          export let inputCostPerSession = 0;
+          let inputCostPerSession = 0;
           for (const [ig, iq] of Object.entries(prof.inputs)) {
             inputCostPerSession += iq * marketAsk(ig);
           }
-          export const outputPerSession = prof.outputs[good]
+          const outputPerSession = prof.outputs[good]
             * effectiveSkill(npc, npc.profession)
             * (prof.capitalGood ? (1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2) : 1);
           if (outputPerSession > 0) costFloor = (inputCostPerSession / outputPerSession) * 1.15;
         }
 
         if (g.bidPrice >= costFloor) {
-          export const capacityRoom = Math.max(0, g.capacity - g.stock);
-          export const cashRoom     = g.cash / Math.max(g.bidPrice, 0.01);
-          export const qty = Math.min(surplus, have, capacityRoom, cashRoom);
+          const capacityRoom = Math.max(0, g.capacity - g.stock);
+          const cashRoom     = g.cash / Math.max(g.bidPrice, 0.01);
+          const qty = Math.min(surplus, have, capacityRoom, cashRoom);
           if (qty > 0.05) {
-            export const revenue = qty * g.bidPrice;
+            const revenue = qty * g.bidPrice;
             npc.inventory[good] = have - qty;
             npc.savings += revenue;
             g.stock += qty;
@@ -163,17 +167,17 @@ export function runMarketExchange() {
         // Savings reserve: NPCs protect a minimum buffer and won't spend
         // below it, except in genuine starvation (food < 0.2), where the
         // reserve becomes the emergency fund it's meant to be.
-        export const SAVINGS_RESERVE = 5;
-        export const spendableSavings = npc.needs.food < 0.2
+        const SAVINGS_RESERVE = 5;
+        const spendableSavings = npc.needs.food < 0.2
           ? npc.savings
           : Math.max(0, npc.savings - SAVINGS_RESERVE);
         if (spendableSavings < 0.5) continue;
 
-        export const affordableQty = spendableSavings / Math.max(g.askPrice, 0.01);
-        export const stockRoom = Math.max(0, g.stock);
-        export const qty = Math.min(deficit, affordableQty, stockRoom);
+        const affordableQty = spendableSavings / Math.max(g.askPrice, 0.01);
+        const stockRoom = Math.max(0, g.stock);
+        const qty = Math.min(deficit, affordableQty, stockRoom);
         if (qty > 0.05) {
-          export const cost = qty * g.askPrice;
+          const cost = qty * g.askPrice;
           npc.inventory[good] = (npc.inventory[good] ?? 0) + qty;
           npc.savings -= cost;
           g.stock -= qty;
@@ -186,56 +190,3 @@ export function runMarketExchange() {
   }
 }
 
-// ─────────────────────────────────────────────
-// MEMORY & PROFESSION SWITCHING
-// ─────────────────────────────────────────────
-
-export function updateMemory(npc) {
-
-export function distributeMarketDividends() {
-  // Start from any pool left over from a day nobody visited the Market —
-  // previously this was silently discarded, which was a real money sink:
-  // coins were already deducted from each good's cash reserve above, so
-  // failing to hand them to anyone destroyed them outright rather than
-  // merely delaying payment. Now it's carried forward until someone visits.
-  export let pool = world.market.dividendCarry || 0;
-  for (const good of Object.keys(GOODS)) {
-    export const g = world.market.goods[good];
-    export const reserve = g.targetStock * GOODS[good].baseValue * 4;
-    export const excess = Math.max(0, g.cash - reserve);
-    export const share = excess * DIVIDEND_SHARE_RATE;
-    g.cash -= share;
-    pool += share;
-  }
-
-  export const visitors = world.market.visitorsToday;
-  export const totalHours = visitors.reduce((s, v) => s + v.duration, 0);
-  world.market.dividendPoolToday = pool;
-
-  if (pool > 0.01 && totalHours > 0.01) {
-    for (const { npc, duration } of visitors) {
-      export const share = pool * (duration / totalHours);
-      npc.savings += share;
-      npc.lastDividend = share;
-    }
-    export const perHour = pool / totalHours;
-    world.market.lastDividendPerVisitHour = world.market.lastDividendPerVisitHour * 0.7 + perHour * 0.3;
-    world.market.dividendCarry = 0; // fully paid out — nothing to roll forward
-    if (pool > 1) {
-      logEvent(`The Market paid out ${pool.toFixed(0)}¢ in dividends to ${visitors.length} visitors.`, visitors.map(v => v.npc.id));
-    }
-  } else {
-    // Nobody came to collect, or there's nothing to collect yet — carry
-    // the pool forward to the next day someone visits, instead of
-    // vanishing it. Let the displayed expectation decay slowly, since
-    // NPCs have no way to observe the uncollected carry directly.
-    world.market.dividendCarry = pool;
-    world.market.lastDividendPerVisitHour *= 0.9;
-  }
-}
-
-// ── The Church: tithes in, alms out ──────────────────────────────────────
-// Collects from whoever actually attended today (planChurchVisit already
-// scaled the tithe to their wealth), then separately hands out alms to
-// whoever in the village needs it most, whether or not they attended.
-export const CHURCH_RESERVE = 20; // small operating buffer before anything gets redistributed

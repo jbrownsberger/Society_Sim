@@ -1,3 +1,7 @@
+// ─────────────────────────────────────────────
+// SEEDED RNG
+// ─────────────────────────────────────────────
+
 export class RNG {
   constructor(seed=42) { this.s = seed; }
   next() { this.s = (this.s * 1664525 + 1013904223) & 0xffffffff; return (this.s >>> 0) / 0xffffffff; }
@@ -6,3 +10,4 @@ export class RNG {
   pick(arr) { return arr[this.int(0, arr.length-1)]; }
 }
 export const rng = new RNG(42);
+

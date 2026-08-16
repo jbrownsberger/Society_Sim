@@ -1,8 +1,5 @@
-import { world } from '../core/world.js';
-import { GOODS, NEEDS, PROFESSIONS } from '../config/constants.js';
-import { needMarginalUtility, goodConsumptionEffect, shouldKeepForConsumption, bufferStockRatio } from '../core/needs.js';
-import { hasWorkableAsset, buildingProductivity } from '../core/assets.js';
-import { effectiveSkill } from '../simulation/actions.js';
+import { GOODS, LABOR_DISUTILITY, PROFESSIONS, goodConsumptionEffect, needMarginalUtility } from './constants.js';
+import { getAffinity, world } from './state.js';
 
 // ─────────────────────────────────────────────
 // SHADOW PRICE SYSTEM  ← the core decision math
@@ -37,16 +34,16 @@ export function marketBid(good) {
 // current expected price (no forecast premium). This means year-1 NPCs under-
 // warehouse slightly — they learn to warehouse better after surviving winter.
 export function expectedSeasonalPrice(npc, good, targetSeason) {
-  export const unwrap = e => (typeof e === 'object' ? e.price : e);
+  const unwrap = e => (typeof e === 'object' ? e.price : e);
   // The Market's posted price history is public — every NPC sees the same
   // record, so there's no need to blend in a separate personal memory of
   // prices the way the old peer-to-peer market required. (npc.memory.
   // priceHistory is still populated, kept for future info-access mechanics
   // — e.g. literacy or distance from the Market gating who gets timely
   // price news — but it currently just mirrors the public record.)
-  export const all = world.market.goods[good]?.priceHistory ?? [];
+  const all = world.market.goods[good]?.priceHistory ?? [];
 
-  export const seasonal = all.filter(e => (typeof e === 'object' ? e.season : null) === targetSeason);
+  const seasonal = all.filter(e => (typeof e === 'object' ? e.season : null) === targetSeason);
   if (seasonal.length < 3) {
     // Insufficient seasonal data — fall back to current expectation.
     // The NPC has no basis to forecast a premium yet.
@@ -60,7 +57,7 @@ export function expectedSeasonalPrice(npc, good, targetSeason) {
 export const SEASON_ORDER = ['spring', 'summer', 'autumn', 'winter'];
 
 export function seasonNDaysAhead(daysAhead) {
-  export const dayOfYear = (world.day + daysAhead) % 360;
+  const dayOfYear = (world.day + daysAhead) % 360;
   return SEASON_ORDER[Math.floor(dayOfYear / 90)];
 }
 
@@ -78,35 +75,35 @@ export function seasonNDaysAhead(daysAhead) {
 // daysToSell: rough estimate of how long until the NPC expects to sell.
 // We use the midpoint of the expected high-price season (90 days away at most).
 export function speculativeCarryValue(npc, good) {
-  export const g = GOODS[good];
+  const g = GOODS[good];
   if (g.perishRate >= 0.5) return 0; // too perishable to warehouse profitably
   if (g.perishRate === 0 && g.nutrition === 0) return 0; // tools: handled separately
 
-  export const currentP = expectedPrice(npc, good);
+  const currentP = expectedPrice(npc, good);
 
   // Find the highest-price season the NPC knows about
-  export let bestSeasonPrice = currentP;
-  export let bestDays = 0;
+  let bestSeasonPrice = currentP;
+  let bestDays = 0;
   for (const season of SEASON_ORDER) {
     if (season === world.season) continue;
-    export const forecast = expectedSeasonalPrice(npc, good, season);
+    const forecast = expectedSeasonalPrice(npc, good, season);
     if (forecast > bestSeasonPrice) {
       bestSeasonPrice = forecast;
       // Rough days until middle of that season
-      export const targetIdx = SEASON_ORDER.indexOf(season);
-      export const currentIdx = SEASON_ORDER.indexOf(world.season);
-      export const seasonsAway = ((targetIdx - currentIdx + 4) % 4);
+      const targetIdx = SEASON_ORDER.indexOf(season);
+      const currentIdx = SEASON_ORDER.indexOf(world.season);
+      const seasonsAway = ((targetIdx - currentIdx + 4) % 4);
       bestDays = seasonsAway * 90 + 45; // midpoint of that season
     }
   }
 
   if (bestDays === 0) return 0; // no better season found
 
-  export const survivalRate  = Math.pow(1 - g.perishRate, bestDays);
-  export const futureValue   = bestSeasonPrice * survivalRate;
-  export const discRate      = discountRate(npc);
-  export const discountFactor = Math.pow(1 - discRate, bestDays);
-  export const presentValue  = futureValue * discountFactor;
+  const survivalRate  = Math.pow(1 - g.perishRate, bestDays);
+  const futureValue   = bestSeasonPrice * survivalRate;
+  const discRate      = discountRate(npc);
+  const discountFactor = Math.pow(1 - discRate, bestDays);
+  const presentValue  = futureValue * discountFactor;
 
   return presentValue - currentP;
 }
@@ -117,10 +114,10 @@ export function speculativeCarryValue(npc, good) {
 // scheduler. Keeping these separate eliminates the double-count that caused
 // "buy grain" to crowd out work itself.
 export function shadowPriceGood(npc, good) {
-  export const g = GOODS[good];
-  export const lam = lambda(npc);
-  export const marketPrice = expectedPrice(npc, good);
-  export const prof = PROFESSIONS[npc.profession];
+  const g = GOODS[good];
+  const lam = lambda(npc);
+  const marketPrice = expectedPrice(npc, good);
+  const prof = PROFESSIONS[npc.profession];
 
   // Speculative carry: if future expected price exceeds current price (net of
   // perish losses and time discounting), holding an extra unit is worth more
@@ -128,22 +125,22 @@ export function shadowPriceGood(npc, good) {
   // hardcoded calendar schedule. A summer NPC values grain at its expected
   // winter resale price, not today's cheap summer price -- automatically.
   // Only applied when the NPC has savings headroom to actually warehouse.
-  export const carry = speculativeCarryValue(npc, good);
-  export const SAVINGS_RESERVE = 5;
-  export const canSpeculate = npc.savings > SAVINGS_RESERVE * 3;
-  export const sellNow   = marketPrice * lam;
-  export const sellLater = canSpeculate ? (marketPrice + carry) * lam : 0;
+  const carry = speculativeCarryValue(npc, good);
+  const SAVINGS_RESERVE = 5;
+  const canSpeculate = npc.savings > SAVINGS_RESERVE * 3;
+  const sellNow   = marketPrice * lam;
+  const sellLater = canSpeculate ? (marketPrice + carry) * lam : 0;
 
   // ── Capital goods: value from future productivity boost ───────────────
   if (good === 'tools') {
     if (!prof?.capitalGood || prof.capitalGood !== 'tools') return Math.max(sellNow, sellLater);
-    export const currentBoost     = 1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2;
-    export const newBoost         = 1 + Math.log1p((npc.inventory.tools ?? 0) + 1) * 0.2;
-    export const productivityGain = newBoost - currentBoost;
-    export const outputGood       = Object.keys(prof.outputs)[0];
-    export const dailyGain        = prof.outputs[outputGood] * productivityGain * expectedPrice(npc, outputGood) * lam;
-    export const discRate         = discountRate(npc);
-    export const pv = dailyGain * (1 - Math.pow(1 - discRate, 120)) / discRate;
+    const currentBoost     = 1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2;
+    const newBoost         = 1 + Math.log1p((npc.inventory.tools ?? 0) + 1) * 0.2;
+    const productivityGain = newBoost - currentBoost;
+    const outputGood       = Object.keys(prof.outputs)[0];
+    const dailyGain        = prof.outputs[outputGood] * productivityGain * expectedPrice(npc, outputGood) * lam;
+    const discRate         = discountRate(npc);
+    const pv = dailyGain * (1 - Math.pow(1 - discRate, 120)) / discRate;
     return Math.max(pv, sellNow, sellLater);
   }
 
@@ -160,9 +157,9 @@ export function shadowPriceGood(npc, good) {
   // comforting: no hardcoded "if food urgent, override comfort" branch is
   // needed here anymore — it falls out of the same shadow-price math every
   // other good uses.
-  export const effect = goodConsumptionEffect(good);
+  const effect = goodConsumptionEffect(good);
   if (effect) {
-    export const useValue = needMarginalUtility(npc, effect.need) * effect.amount;
+    const useValue = needMarginalUtility(npc, effect.need) * effect.amount;
     return Math.max(useValue, sellNow, sellLater);
   }
 
@@ -191,8 +188,8 @@ export function lambda(npc) {
   // stale, fictitiously-low mid-price used to accidentally inflate lambda
   // enough to paper over the mid/ask gap; fixing stock-awareness removed
   // that lucky accident and exposed the real defect underneath it.
-  export const grainFloor = Math.max(marketAsk('grain'), GOODS.grain.baseValue * 0.25);
-  export const breadFloor = Math.max(marketAsk('bread'), GOODS.bread.baseValue * 0.25);
+  const grainFloor = Math.max(marketAsk('grain'), GOODS.grain.baseValue * 0.25);
+  const breadFloor = Math.max(marketAsk('bread'), GOODS.bread.baseValue * 0.25);
 
   // Only treat a food good as part of "cheapest available food" if the
   // Market actually has stock of it right now. Previously this always
@@ -208,9 +205,9 @@ export function lambda(npc) {
   // back to the old theoretical floor rather than let lambda blow up —
   // a genuine full stockout should read as scarcity (see the stockout
   // finding from the market-visit fix), not an infinite money-value spike.
-  export const grainInStock = (world.market.goods.grain?.stock ?? 0) >= 0.5;
-  export const breadInStock = (world.market.goods.bread?.stock ?? 0) >= 0.5;
-  export let cheapestFoodPrice;
+  const grainInStock = (world.market.goods.grain?.stock ?? 0) >= 0.5;
+  const breadInStock = (world.market.goods.bread?.stock ?? 0) >= 0.5;
+  let cheapestFoodPrice;
   if (grainInStock || breadInStock) {
     cheapestFoodPrice = Math.min(
       grainInStock ? grainFloor / GOODS.grain.nutrition : Infinity,
@@ -223,11 +220,11 @@ export function lambda(npc) {
     );
   }
 
-  export const foodMU = needMarginalUtility(npc, 'food');
-  export let lam = foodMU / cheapestFoodPrice;
+  const foodMU = needMarginalUtility(npc, 'food');
+  let lam = foodMU / cheapestFoodPrice;
 
   // Via security: savings buffer
-  export const secMU = needMarginalUtility(npc, 'security');
+  const secMU = needMarginalUtility(npc, 'security');
   lam += secMU / 30;
 
   // Hard cap: lambda can't exceed foodMU / (baseValue floor), preventing
@@ -239,7 +236,7 @@ export function lambda(npc) {
   // with foodMU itself, so the cap rises proportionally during a food
   // crisis rather than clipping the very spike that's supposed to
   // reorder priorities.
-  export const lamCap = foodMU / (GOODS.grain.baseValue * 0.25 / GOODS.grain.nutrition);
+  const lamCap = foodMU / (GOODS.grain.baseValue * 0.25 / GOODS.grain.nutrition);
   return Math.min(Math.max(lam, 0.01), lamCap);
 }
 
@@ -250,83 +247,94 @@ export function discountRate(npc) {
 
 // Score an action in utility/hour
 export function scoreAction(action, npc) {
+  const lam = lambda(npc);
 
-  export const hist = world.market.goods[good]?.priceHistory;
-  if (!hist || hist.length === 0) return expectedPrice(npc, good);
-  export const recent = hist.slice(-days);
-  return recent.reduce((s, h) => s + h.price, 0) / recent.length;
-}
-
-export function profSessionEV(npc, profId, ignoreAssetGate) {
-  export const prof = PROFESSIONS[profId];
-  if (!prof) return -Infinity;
-  if (!ignoreAssetGate && !hasWorkableAsset(npc, profId)) return -Infinity;
-  if (npc.energy < 20) return -Infinity;
-
-  export const lam      = lambda(npc);
-  export const skill    = effectiveSkill(npc, profId);
-  export const capMod   = prof.capitalGood ? (1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2) : 1;
-  export const buildMod = buildingProductivity(profId);
-  export const seasonal = profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
-  export const ENERGY_SHADOW = 0.05;
-
-  export let revenue = 0;
-  for (const [g, qty] of Object.entries(prof.outputs)) {
-    revenue += qty * skill * capMod * buildMod * seasonal * smoothedExpectedPrice(npc, g);
+  // Some actions (asset sale listing, tinkering) carry their own
+  // pre-computed NPV-based utility rather than decomposing into the
+  // generic need/goods/money terms below — those actions set
+  // _scoreOverride at construction time (see planAssetSaleActions,
+  // planTinkerAction) since their value comes from a discounted future
+  // payoff, not an immediate need/goods/money flow this function tracks.
+  if (typeof action._scoreOverride === 'number') {
+    return action._scoreOverride / action.duration;
   }
 
-  export let inputCashCost = 0;
-  for (const [g, qty] of Object.entries(prof.inputs)) {
-    export const shortfall = Math.max(0, qty - (npc.inventory[g] ?? 0));
-    inputCashCost += shortfall * marketAsk(g);
+  let score = 0;
+
+  // Need satisfaction effects — routed through the single generic
+  // needMarginalUtility function so every need (existing or newly added
+  // to the NEEDS registry) is weighed the same way, including the
+  // starvation-cliff spike for critical needs.
+  if (action.needEffects) {
+    for (const [need, amount] of Object.entries(action.needEffects)) {
+      score += needMarginalUtility(npc, need) * amount;
+    }
   }
 
-  if (inputCashCost > npc.savings + 0.01) return -Infinity;
+  // Goods produced
+  if (action.goodsProduced) {
+    for (const [good, qty] of Object.entries(action.goodsProduced)) {
+      score += shadowPriceGood(npc, good) * qty;
+    }
+  }
 
-  export const netCoins = revenue - inputCashCost;
-  return netCoins * lam - 25 * ENERGY_SHADOW - LABOR_DISUTILITY * 6;
+  // Goods consumed (cost)
+  // For sale actions, skip shadow-price deduction — the revenue is already
+  // captured in moneyEarned. Deducting shadow price too would double-penalise
+  // selling, especially for millers whose grain has high productive shadow price.
+  if (action.goodsConsumed && !action.isSale) {
+    for (const [good, qty] of Object.entries(action.goodsConsumed)) {
+      score -= shadowPriceGood(npc, good) * qty;
+    }
+  }
+
+  // Money flows
+  if (action.moneyEarned)  score += action.moneyEarned * lam;
+  if (action.moneyCost)    score -= action.moneyCost * lam;
+
+  // Effect on a THIRD PARTY, discounted by affinity toward them — the one
+  // new term relational mechanics needed. `help` gives money outright
+  // (simplest first-pass model — cash is fungible and the recipient can
+  // buy whatever they actually need at market themselves, so this
+  // doesn't require modeling in-kind good transfer). Valued through the
+  // RECIPIENT's own lambda — the same food/security-desperation-aware
+  // marginal-utility-of-money function used everywhere else — multiplied
+  // by the giver's affinity toward them. Positive affinity makes helping
+  // a desperate friend score real value; zero or negative affinity makes
+  // it score near-zero or negative even for a friend in genuine need — no
+  // separate "would I help this person" branch required, it falls out of
+  // this one multiplicative term same as every other action here.
+  if (action.affinityTarget) {
+    const { npcId, moneyGift } = action.affinityTarget;
+    const target = world.npcs.get(npcId);
+    if (target) {
+      score += getAffinity(npc, npcId) * lambda(target) * moneyGift;
+    }
+  }
+
+  // Explicit opportunity cost (see 'help' in getAvailableActions) —
+  // already in the same utility-scaled units profSessionEV produces, so
+  // this is a direct subtraction, not something requiring its own
+  // lambda conversion.
+  if (action.opportunityCost) score -= action.opportunityCost;
+
+  // Energy cost/restore: fixed utility shadow, NOT tied to lambda.
+  // Coupling to lambda causes rest to score infinitely high when prices
+  // collapse (lambda → ∞), which locks everyone into permanent rest.
+  // A point of energy is worth ~0.05 utility regardless of market prices —
+  // calibrated so a well-fed NPC with average wages works ~8 hrs/day.
+  const ENERGY_SHADOW = 0.05;
+  if (action.energyCost)    score -= action.energyCost    * ENERGY_SHADOW;
+  if (action.energyRestored) score += action.energyRestored * ENERGY_SHADOW;
+
+  // Labor disutility
+  if (action.isLabor) score -= LABOR_DISUTILITY * action.duration;
+
+  // Generic flat utility cost, pre-scaled by the caller (e.g. duration).
+  // Used for activities that cost effort but aren't full manual labor —
+  // a market visit is tiring in a different, lighter way than farm work.
+  if (action.disutility) score -= action.disutility;
+
+  return score / action.duration; // utility per hour
 }
 
-// workSessionEV: returns { ev, profId } for the best available work today.
-// Tries the NPC's primary profession first. If that's blocked (inputs
-// unaffordable), falls back to no-input professions (farmer, woodcutter).
-// A broke miller doesn't rest — they help with the harvest until they can
-// afford grain again. The NPC keeps their profession identity; this is
-// casual day-labour, not a switch.
-
-// ─────────────────────────────────────────────
-// LABOR MARKET — hired labor at owned assets
-// ─────────────────────────────────────────────
-//
-// An asset owner with spare capacity (their farm/mill/forge/workshop can
-// support more than one worker, per ASSET_TYPES' capacity field) can hire
-// someone else to work it. This is the missing piece that lets a
-// struggling or absent owner still extract value from an asset instead of
-// their only options being "grind it out alone" or "abandon it entirely"
-// — directly targeting the one-way collapse into woodcutting observed in
-// testing, where asset professions had no recovery path once an owner
-// faltered.
-//
-// Mechanics, kept deliberately simple for a first pass:
-//   - Each day, every asset owner with spare capacity posts a wage offer
-//     equal to a fraction of the marginal output value an additional
-//     worker would generate (owner keeps the surplus as their profit —
-//     the classic capital/labor split).
-//   - Any NPC without a workable primary asset of their own (today, this
-//     is effectively "woodcutters and other unemployed/asset-less NPCs")
-//     compares the best available wage offer against their own best
-//     self-employment EV (workSessionEV) and takes whichever pays more.
-//   - Hired labor produces at the LABORER's own skill level, but goods
-//     accrue to the EMPLOYER's inventory (the employer owns the output,
-//     same as any real employment relationship) — and the employer pays
-//     the wage immediately from savings, whether or not they've sold
-//     that output yet (a short-term cash outlay against future revenue,
-//     which is exactly what real capital owners do).
-
-export const LABOR_WAGE_SHARE = 0.55; // laborer's cut of marginal output value; owner keeps the rest as profit
-
-// Marginal output value of adding ONE more worker at this asset, using
-// the OWNER's context for pricing (expectedPrice etc. are npc-specific
-// memory, but using the owner's is a reasonable proxy for "what this
-// asset's output is worth to sell").
-export function marginalHireValue(owner, asset) {

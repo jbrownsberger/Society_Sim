@@ -1,6 +1,12 @@
-import { world } from '../core/world.js';
-import { rng } from '../config/rng.js';
-import { getAvailableActions, scoreAction, workSessionEV, planMarketVisit, planChurchVisit, planAssetSaleActions, planTinkerAction, planConstructionAction } from './actions.js';
+import { PROFESSIONS, SEASONAL_GRAIN, buildingProductivity, emergencyReplanNeeded } from './constants.js';
+import { bumpAffinity, getAffinity, world } from './state.js';
+import { expectedPrice, scoreAction } from './prices.js';
+import { bestWageOffer } from './labor.js';
+import { workSessionEV } from './construction.js';
+import { TINKER_SKILL_CEILING } from './actions.js';
+import { effectiveSkill, getAvailableActions } from './death.js';
+import { executeSchedule } from './execution.js';
+import { satisfyNeeds } from './needs.js';
 
 // ─────────────────────────────────────────────
 // DAILY SCHEDULE BUILDER — TWO-PASS
@@ -137,7 +143,7 @@ export function applySimEffects(sim, action) {
     }
   }
   if (action.id === 'tinker' && action.profId) {
-    export const current = sim.skills[action.profId] ?? 0;
+    const current = sim.skills[action.profId] ?? 0;
     if (current < TINKER_SKILL_CEILING) {
       sim.skills[action.profId] = Math.min(TINKER_SKILL_CEILING, current + action._skillGainFrac);
     }
@@ -182,8 +188,8 @@ export function applySimEffects(sim, action) {
 //      priced goods through shadowPriceGood (which also reflects
 //      use-value, not just sale price). That inconsistency is gone.
 export function buildDayCandidates(npc, priorDayActions = []) {
-  export const WORK_DURATION = 6;
-  export const candidates = [];
+  const WORK_DURATION = 6;
+  const candidates = [];
 
   // ── Self-employment work block(s) ────────────────────────────────────
   // workSessionEV still decides WHICH profession to work as today
@@ -191,14 +197,14 @@ export function buildDayCandidates(npc, priorDayActions = []) {
   // — that sub-choice isn't part of the time-allocation question this
   // scheduler answers, it's a separate "what am I capable of doing right
   // now" lookup, same role as bestWageOffer() below.
-  export const { ev, workAs } = workSessionEV(npc);
+  const { ev, workAs } = workSessionEV(npc);
   if (workAs && isFinite(ev)) {
-    export const workProf = PROFESSIONS[workAs];
-    export const skill    = effectiveSkill(npc, workAs);
-    export const capMod   = workProf.capitalGood ? (1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2) : 1;
-    export const buildMod = buildingProductivity(workAs);
-    export const seasonal = workAs === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
-    export const workLabel = workAs === npc.profession ? `Work (${workProf.name})` : `Casual labour (${workProf.name})`;
+    const workProf = PROFESSIONS[workAs];
+    const skill    = effectiveSkill(npc, workAs);
+    const capMod   = workProf.capitalGood ? (1 + Math.log1p(npc.inventory.tools ?? 0) * 0.2) : 1;
+    const buildMod = buildingProductivity(workAs);
+    const seasonal = workAs === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
+    const workLabel = workAs === npc.profession ? `Work (${workProf.name})` : `Casual labour (${workProf.name})`;
 
     // Up to two blocks/day, exactly as before. Both are scored ONCE from
     // the current snapshot — block 2 simply assumes the fatigue a first
@@ -208,21 +214,21 @@ export function buildDayCandidates(npc, priorDayActions = []) {
     // allocation pass below enforce "block 2 only after block 1" and
     // "self-work and hired-labor can't both happen the same day" with
     // simple bookkeeping instead of sequential re-evaluation.
-    export const blockDefs = [
+    const blockDefs = [
       { energyBefore: npc.energy,      group: 'primary-labor',   requires: null },
       { energyBefore: npc.energy - 25, group: 'primary-labor-2', requires: 'primary-labor' },
     ];
     for (const b of blockDefs) {
       if (b.energyBefore < 30) continue;
-      export const energyMod = b.energyBefore / 100;
-      export const goodsConsumed = {}, goodsProduced = {};
-      export let inputsOk = true;
+      const energyMod = b.energyBefore / 100;
+      const goodsConsumed = {}, goodsProduced = {};
+      let inputsOk = true;
       for (const [g, qty] of Object.entries(workProf.inputs)) {
         goodsConsumed[g] = qty;
         // Block 2 must be able to afford a SECOND round of inputs, net of
         // what block 1 would already have drawn from inventory.
         if (b.requires) {
-          export const haveAfterFirst = Math.max(0, (npc.inventory[g] ?? 0) - qty);
+          const haveAfterFirst = Math.max(0, (npc.inventory[g] ?? 0) - qty);
           if (haveAfterFirst < qty && npc.savings < expectedPrice(npc, g) * qty) { inputsOk = false; break; }
         }
       }
@@ -230,7 +236,7 @@ export function buildDayCandidates(npc, priorDayActions = []) {
       for (const [g, qty] of Object.entries(workProf.outputs)) {
         goodsProduced[g] = qty * skill * capMod * buildMod * energyMod * seasonal;
       }
-      export const action = {
+      const action = {
         id: 'work', label: workLabel, duration: WORK_DURATION, isLabor: true,
         energyCost: 25, goodsProduced, goodsConsumed,
         _group: b.group, _requires: b.requires,
@@ -245,15 +251,15 @@ export function buildDayCandidates(npc, priorDayActions = []) {
   // hand-written if/else comparison — decides which one wins, purely by
   // score. Goods produced accrue to the EMPLOYER (see executeSchedule),
   // so only the wage is scored here, not the goods.
-  export const wageOffer = bestWageOffer(npc);
+  const wageOffer = bestWageOffer(npc);
   if (wageOffer) {
-    export const employer = world.npcs.get(wageOffer.employerId);
-    export const laborProf = PROFESSIONS[wageOffer.profId];
-    export const skill = effectiveSkill(npc, wageOffer.profId);
-    export const buildMod = buildingProductivity(wageOffer.profId);
-    export const seasonal = wageOffer.profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
-    export const energyMod = npc.energy / 100;
-    export const goodsProduced = {};
+    const employer = world.npcs.get(wageOffer.employerId);
+    const laborProf = PROFESSIONS[wageOffer.profId];
+    const skill = effectiveSkill(npc, wageOffer.profId);
+    const buildMod = buildingProductivity(wageOffer.profId);
+    const seasonal = wageOffer.profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
+    const energyMod = npc.energy / 100;
+    const goodsProduced = {};
     for (const [g, qty] of Object.entries(laborProf.outputs)) {
       goodsProduced[g] = qty * skill * buildMod * energyMod * seasonal;
     }
@@ -264,11 +270,11 @@ export function buildDayCandidates(npc, priorDayActions = []) {
     // hire a miller and receive full bread output with zero grain ever
     // deducted from anywhere — a pure conservation violation, worse than
     // the self-employed version of the same bug.
-    export const goodsConsumed = {};
+    const goodsConsumed = {};
     for (const [g, qty] of Object.entries(laborProf.inputs)) {
       goodsConsumed[g] = qty;
     }
-    export const action = {
+    const action = {
       id: 'hired-labor', label: `Hired labor (${laborProf.name}${employer ? ' for ' + employer.name : ''})`,
       duration: WORK_DURATION, isLabor: true, energyCost: 25,
       wage: wageOffer.wage, employerId: wageOffer.employerId, assetId: wageOffer.assetId,
@@ -277,7 +283,7 @@ export function buildDayCandidates(npc, priorDayActions = []) {
     };
     // Score without goodsProduced (this NPC never receives them) but keep
     // it on the stored action so execution can still credit the employer.
-    export const scoringAction = { ...action };
+    const scoringAction = { ...action };
     delete scoringAction.goodsProduced;
     candidates.push({ ...action, goodsProduced, score: scoreAction(scoringAction, npc) });
   }
@@ -307,9 +313,9 @@ export function buildDayCandidates(npc, priorDayActions = []) {
   // correctly abandoning a habit the world has genuinely turned against
   // rather than clinging to it.
   if (priorDayActions.length > 0) {
-    export const priorKeys = new Set(priorDayActions.map(a => a.id + '|' + (a._group || '')));
+    const priorKeys = new Set(priorDayActions.map(a => a.id + '|' + (a._group || '')));
     for (const c of candidates) {
-      export const key = c.id + '|' + (c._group || '');
+      const key = c.id + '|' + (c._group || '');
       if (priorKeys.has(key)) c.score *= (1 + HABIT_CONTINUITY_BONUS);
     }
   }
@@ -326,10 +332,10 @@ export function buildDayCandidates(npc, priorDayActions = []) {
 // candidate list to begin with — there's no separate "one-shot" rule to
 // maintain anymore.
 export function allocateDay(candidates, hoursAvailable) {
-  export const sorted = [...candidates].sort((a, b) => b.score - a.score);
-  export const daySchedule = [];
-  export const chosenGroups = new Set();
-  export let timeLeft = hoursAvailable;
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  const daySchedule = [];
+  const chosenGroups = new Set();
+  let timeLeft = hoursAvailable;
 
   for (const c of sorted) {
     if (timeLeft <= 0.25) break;
@@ -339,7 +345,7 @@ export function allocateDay(candidates, hoursAvailable) {
       if (c._requires && !chosenGroups.has(c._requires)) continue;
     }
 
-    export const dur = Math.min(c.duration, timeLeft);
+    const dur = Math.min(c.duration, timeLeft);
     daySchedule.push({ ...c, duration: dur });
     timeLeft -= dur;
     if (c._group) chosenGroups.add(c._group);
@@ -360,22 +366,22 @@ export function allocateDay(candidates, hoursAvailable) {
 // quantities/prices still resolve live, day by day, in executeSchedule/
 // runMarketExchange when each day for real arrives.
 export function planWeek(npc) {
-  export const sim = cloneNpcForPlanning(npc);
-  export const weekPlan = [];
+  const sim = cloneNpcForPlanning(npc);
+  const weekPlan = [];
   // Captured once, up front: npc.weekPlan still holds the PRIOR plan at
   // this point (we haven't overwritten it yet) — comparing new-plan day d
   // against old-plan day d is exactly "same slot in the weekly routine,"
   // since replanning happens on a consistent 7-day cadence per NPC in the
   // normal (non-emergency) case. See buildDayCandidates' habit-continuity
   // block for what this is used for.
-  export const priorWeekPlan = npc.weekPlan || [];
+  const priorWeekPlan = npc.weekPlan || [];
 
   for (let d = 0; d < PLANNING_HORIZON_DAYS; d++) {
-    export const candidates = buildDayCandidates(sim, priorWeekPlan[d] || []);
-    export const daySchedule = allocateDay(candidates, DAILY_HOURS);
+    const candidates = buildDayCandidates(sim, priorWeekPlan[d] || []);
+    const daySchedule = allocateDay(candidates, DAILY_HOURS);
 
     if (d === 0) {
-      export const hiredEntry = daySchedule.find(a => a.id === 'hired-labor');
+      const hiredEntry = daySchedule.find(a => a.id === 'hired-labor');
       if (hiredEntry && hiredEntry._wageOfferRef) hiredEntry._wageOfferRef.slotsRemaining -= 1;
     }
 
@@ -401,7 +407,7 @@ export function planWeek(npc) {
 // to npc.schedule for execution, unchanged from how execution always
 // worked.
 export function buildSchedule(npc) {
-  export const needsReplan =
+  const needsReplan =
     !npc.weekPlan || npc.weekPlan.length === 0 ||
     npc.weekPlanDay >= npc.weekPlan.length ||
     (world.day + npc.planOffset) % PLANNING_HORIZON_DAYS === 0 ||
@@ -412,13 +418,10 @@ export function buildSchedule(npc) {
     npc.weekPlanDay = 0;
   }
 
-  export const dayIdx = Math.min(npc.weekPlanDay, npc.weekPlan.length - 1);
+  const dayIdx = Math.min(npc.weekPlanDay, npc.weekPlan.length - 1);
   npc.schedule = npc.weekPlan[dayIdx] ?? [];
   npc.weekPlanDay = dayIdx + 1;
   npc.scheduleIdx = 0;
   npc.currentAction = npc.schedule[0]?.id ?? 'idle';
 }
 
-// ─────────────────────────────────────────────
-// ACTION EXECUTION
-// ─────────────────────────────────────────────
