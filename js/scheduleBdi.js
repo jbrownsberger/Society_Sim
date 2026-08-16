@@ -5,6 +5,7 @@ import { workSessionEV } from './construction.js';
 import { applySimEffects } from './scheduler.js';
 import { satisfyNeeds } from './needs.js';
 import { effectiveSkill } from './death.js';
+import { bdiHiredLaborAction, bdiPlane2Actions } from './bdiAgent.js';
 
 export const SCHEDULE_CATEGORIES = ['work', 'market', 'rest', 'leisure'];
 export const SCHEDULE_N_PAIRS = 2;
@@ -15,7 +16,6 @@ export const DEFAULT_SHADOW_SCHEDULE = { work: 40, market: 15, rest: 25, leisure
 export const DAILY_HOURS = 16;
 export const PLANNING_HORIZON_DAYS = 7;
 export const BDI_ADOPTION_FRACTION = 1;
-export const PLANE1_ACTION_IDS = new Set(['work', 'hired-labor', 'market', 'rest', 'socialize', 'church', 'leisure']);
 
 function cloneNpcForPlanning(npc) {
   return {
@@ -81,7 +81,10 @@ export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHou
   const restHours = weekSchedule.rest * dayFraction;
   const leisureHours = weekSchedule.leisure * dayFraction;
 
-  if (dayWorkHours > 0.1) {
+  const hire = bdiHiredLaborAction(sim);
+  if (hire && dayWorkHours > 0.1) {
+    actions.push({ ...hire, duration: dayWorkHours });
+  } else if (dayWorkHours > 0.1) {
     const { workAs } = workSessionEV(sim);
     if (workAs) {
       const prof = PROFESSIONS[workAs];
@@ -143,7 +146,6 @@ export function scheduleProjectWeek(candidateSchedule, npc) {
   for (let d = 0; d < PLANNING_HORIZON_DAYS; d++) {
     const dayFraction = DAILY_HOURS / totalHours;
     let dayWorkHours = candidateSchedule.work * dayFraction;
-
     if (sim.constructionProject) {
       const hoursRemaining = sim.constructionProject.laborHoursNeeded - sim.constructionProject.laborHoursDone;
       const claimed = Math.min(6, hoursRemaining, dayWorkHours);
@@ -153,7 +155,6 @@ export function scheduleProjectWeek(candidateSchedule, npc) {
         sim.constructionProject = null;
       }
     }
-
     const dayActions = buildShadowDayActions(sim, candidateSchedule, dayFraction, dayWorkHours);
     for (const action of dayActions) applySimEffects(sim, action);
     satisfyNeeds(sim);
@@ -212,14 +213,13 @@ export function todaysBdiActions(npc) {
 
 export function applyBdiDayIfEnabled(npc) {
   npc.useBdiSchedule = true;
-  const plane2 = (npc.schedule || []).filter(a => !PLANE1_ACTION_IDS.has(a.id));
-  npc.schedule = [...todaysBdiActions(npc), ...plane2];
+  npc.schedule = [...todaysBdiActions(npc), ...bdiPlane2Actions(npc)];
   npc.scheduleIdx = 0;
   npc.currentAction = npc.schedule[0]?.id ?? 'idle';
   return true;
 }
 
-export function seedBdiAdoption(fraction = BDI_ADOPTION_FRACTION) {
+export function seedBdiAdoption() {
   for (const npc of world.npcs.values()) {
     npc.useBdiSchedule = true;
     if (!npc.shadowSchedule) npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
@@ -227,9 +227,7 @@ export function seedBdiAdoption(fraction = BDI_ADOPTION_FRACTION) {
 }
 
 export function shadowDeliberateSchedule(npc) {
-  if (!npc.shadowSchedule) {
-    npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
-  }
+  if (!npc.shadowSchedule) npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
   const crisis = emergencyReplanNeeded(npc);
   const planOffset = npc.planOffset ?? (npc.id % PLANNING_HORIZON_DAYS);
   if (!crisis && world.day % PLANNING_HORIZON_DAYS !== planOffset) return;
@@ -249,11 +247,7 @@ export function shadowDeliberateSchedule(npc) {
     : best.projection.value > currentProjection.value * (1 + SCHEDULE_REFINEMENT_MARGIN);
 
   npc.bdi = {
-    beliefs: {
-      crisis,
-      starvedInRollout: currentProjection.starvedAnyDay,
-      marginalValue: mv,
-    },
+    beliefs: { crisis, starvedInRollout: currentProjection.starvedAnyDay, marginalValue: mv },
     desires: candidates.length,
     intention: npc.shadowSchedule,
     projection: best.projection,
@@ -262,19 +256,12 @@ export function shadowDeliberateSchedule(npc) {
   };
 
   if (improvedEnough && best.schedule !== npc.shadowSchedule) {
-    console.log(
-      `[bdi] Day ${world.day} ${npc.name}: revise schedule`,
-      npc.shadowSchedule,
-      'to',
-      best.schedule
-    );
+    console.log(`[bdi] Day ${world.day} ${npc.name}: revise schedule`, npc.shadowSchedule, 'to', best.schedule);
     npc.shadowSchedule = best.schedule;
     npc.bdi.intention = best.schedule;
   }
 }
 
 export function shadowDeliberateAll() {
-  for (const npc of world.npcs.values()) {
-    shadowDeliberateSchedule(npc);
-  }
+  for (const npc of world.npcs.values()) shadowDeliberateSchedule(npc);
 }
