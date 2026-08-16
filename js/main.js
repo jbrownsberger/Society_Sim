@@ -2,23 +2,24 @@ import { world } from './state.js';
 import { initWorld } from './npc.js';
 import { initBank } from './auctions.js';
 import { tickDay } from './simulation.js';
+import { shadowDeliberateAll } from './scheduleBdi.js';
 import { canvas, drawScene, initCanvas } from './render.js';
 import { selection, updateUI } from './ui.js';
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 // INIT — run once, after every module has finished loading, so all the
 // cyclic imports (world/npc/auctions all reference each other) are fully
 // resolved before anything reads them. See initWorld()/initBank() for why
 // this can't just happen at module-load time the way it did in the
 // original single-file version.
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 initBank();
 initWorld();
 initCanvas();
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 // GAME LOOP
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 
 export let simTickMs = 0; // paused
 export let accumulator = 0;
@@ -54,6 +55,7 @@ export function gameLoop(ts) {
     let ticks = 0;
     while (accumulator >= simTickMs && ticks < 10) {
       tickDay();
+      shadowDeliberateAll();
       accumulator -= simTickMs;
       ticks++;
     }
@@ -105,7 +107,7 @@ canvas.addEventListener('click', (e) => {
 // Initial UI draw and start loop
 updateUI();
 requestAnimationFrame(gameLoop);
-// ── Tab switching ────────────────────────────
+// ── Tab switching ────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
@@ -122,4 +124,3 @@ export function switchToInspector() {
   document.querySelector('[data-tab="inspector"]').classList.add('active');
   document.getElementById('tab-inspector').classList.add('active');
 }
-
