@@ -7,7 +7,8 @@ import { satisfyNeeds } from './needs.js';
 import { effectiveSkill } from './death.js';
 
 // Stage 1: Plane-1 intention is a weekly hour allocation.
-// Live EV allocator still decides the day; this revises npc.shadowSchedule only.
+// Live EV allocator still decides the day unless npc.useBdiSchedule is set
+// and applyBdiDayIfEnabled() is called from buildSchedule.
 export const SCHEDULE_CATEGORIES = ['work', 'market', 'rest', 'leisure'];
 export const SCHEDULE_N_PAIRS = 2;
 export const SCHEDULE_SMALL_STEPS = [2, 6];
@@ -16,6 +17,9 @@ export const SCHEDULE_REFINEMENT_MARGIN = 0.02;
 export const DEFAULT_SHADOW_SCHEDULE = { work: 40, market: 15, rest: 25, leisure: 20 };
 export const DAILY_HOURS = 16;
 export const PLANNING_HORIZON_DAYS = 7;
+
+// Stage 2: fraction of founding NPCs who will use BDI for Plane 1 once hooked.
+export const BDI_ADOPTION_FRACTION = 0.25;
 
 function cloneNpcForPlanning(npc) {
   return {
@@ -75,7 +79,7 @@ export function scheduleAnalyticPrefilter(schedule, mv, nPairs = SCHEDULE_N_PAIR
   return [...pairs].map(p => JSON.parse(p));
 }
 
-function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHours) {
+export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHours) {
   const actions = [];
   const marketHours = weekSchedule.market * dayFraction;
   const restHours = weekSchedule.rest * dayFraction;
@@ -198,6 +202,36 @@ export function scheduleGenerateCandidates(schedule, mv, crisis) {
   return candidates;
 }
 
+export function todaysBdiActions(npc) {
+  if (!npc.shadowSchedule) npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
+  const totalHours = Object.values(npc.shadowSchedule).reduce((a, b) => a + b, 0) || 1;
+  const dayFraction = DAILY_HOURS / totalHours;
+  let dayWorkHours = npc.shadowSchedule.work * dayFraction;
+  if (npc.constructionProject) {
+    const hoursRemaining = npc.constructionProject.laborHoursNeeded - npc.constructionProject.laborHoursDone;
+    dayWorkHours -= Math.min(6, hoursRemaining, dayWorkHours);
+  }
+  return buildShadowDayActions(npc, npc.shadowSchedule, dayFraction, dayWorkHours);
+}
+
+/** Stage 2 cutover: replace today's Plane-1 schedule when the NPC is flagged. */
+export function applyBdiDayIfEnabled(npc) {
+  if (!npc.useBdiSchedule) return false;
+  npc.schedule = todaysBdiActions(npc);
+  npc.scheduleIdx = 0;
+  npc.currentAction = npc.schedule[0]?.id ?? 'idle';
+  return true;
+}
+
+export function seedBdiAdoption(fraction = BDI_ADOPTION_FRACTION) {
+  const npcs = [...world.npcs.values()].sort((a, b) => a.id - b.id);
+  const n = Math.round(npcs.length * fraction);
+  npcs.forEach((npc, i) => {
+    npc.useBdiSchedule = i < n;
+    if (!npc.shadowSchedule) npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
+  });
+}
+
 export function shadowDeliberateSchedule(npc) {
   if (!npc.shadowSchedule) {
     npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
@@ -230,6 +264,7 @@ export function shadowDeliberateSchedule(npc) {
     intention: npc.shadowSchedule,
     projection: best.projection,
     liveAction: npc.currentAction,
+    useBdiSchedule: !!npc.useBdiSchedule,
   };
 
   if (improvedEnough && best.schedule !== npc.shadowSchedule) {
@@ -238,7 +273,7 @@ export function shadowDeliberateSchedule(npc) {
       npc.shadowSchedule,
       'to',
       best.schedule,
-      `(live action: ${npc.currentAction})`
+      `(live action: ${npc.currentAction}${npc.useBdiSchedule ? ', flagged for Stage-2 apply' : ''})`
     );
     npc.shadowSchedule = best.schedule;
     npc.bdi.intention = best.schedule;

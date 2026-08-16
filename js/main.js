@@ -2,7 +2,7 @@ import { world } from './state.js';
 import { initWorld } from './npc.js';
 import { initBank } from './auctions.js';
 import { tickDay } from './simulation.js';
-import { shadowDeliberateAll } from './scheduleBdi.js';
+import { seedBdiAdoption, shadowDeliberateAll } from './scheduleBdi.js';
 import { canvas, drawScene, initCanvas } from './render.js';
 import { selection, updateUI } from './ui.js';
 
@@ -15,6 +15,7 @@ import { selection, updateUI } from './ui.js';
 // ─────────────────────────────────────────
 initBank();
 initWorld();
+seedBdiAdoption();
 initCanvas();
 
 // ─────────────────────────────────────────
@@ -88,8 +89,6 @@ canvas.addEventListener('click', (e) => {
     return;
   }
 
-  // No NPC hit — check structures (simple radius test around each
-  // building's pixel center; good enough at this footprint scale).
   let closestS = null, closestSDist = 18;
   for (const s of world.structures.values()) {
     const d = Math.hypot(s.x - mx, s.y - my);
@@ -103,11 +102,9 @@ canvas.addEventListener('click', (e) => {
   }
 });
 
-// Helpers
-// Initial UI draw and start loop
 updateUI();
 requestAnimationFrame(gameLoop);
-// ── Tab switching ────────────────────
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
