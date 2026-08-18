@@ -120,7 +120,12 @@ export function runMarketExchange() {
   }
 
   for (const npc of npcOrder) {
-    for (const good of Object.keys(GOODS)) {
+    // Match the BDI market plan: a household with limited cash first buys
+    // the most nutritious available food, rather than following the source
+    // order (which happened to put low-nutrition grain ahead of bread).
+    const goodsInTradeOrder = Object.keys(GOODS)
+      .sort((a, b) => (GOODS[b].nutrition ?? 0) - (GOODS[a].nutrition ?? 0));
+    for (const good of goodsInTradeOrder) {
       const g = world.market.goods[good];
       const have    = npc.inventory[good] ?? 0;
       const target  = getBufferTarget(npc, good);

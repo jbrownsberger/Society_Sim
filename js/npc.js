@@ -1,7 +1,7 @@
 import { ACTIVITY_SOCIAL_CAP, ASSET_TYPES, DOG_YEAR_DAYS, FOOTPRINTS, GOODS, GRID_CELL, LABOR_DISUTILITY, MATERIAL_COMFORT_CAP, NEEDS, OLD_AGE_MAX_DOGYEARS, OLD_AGE_MIN_DOGYEARS, PROFESSIONS, allocStructureId, familyChannelTarget, findFreeGridSpot, generateName, housingQuality, occupyGrid, seedAssets } from './constants.js';
 import { rng } from './rng.js';
 import { POPULATION, world } from './state.js';
-import { MIN_BIRTH_SPACING_DAYS, graduateChild } from './marriage.js';
+import { graduateChild } from './marriage.js';
 import { killNPC, tickAgingAndDeaths } from './death.js';
 import { issueDebt, serviceDebts } from './auctions.js';
 
@@ -40,7 +40,7 @@ export function makeNPC(prof, x, y) {
     spouseId: null,       // married NPC's id, or null
     childIds: [],         // ids into world.children — dependents this NPC is a parent of
     parentIds: [],        // this NPC's own parents' ids, if they grew up in this sim (see graduateChild) — empty for founding villagers. Kept after growing up specifically so killNPC can find living adult children as heirs.
-    lastChildbirthDay: -Infinity, // enforces MIN_BIRTH_SPACING_DAYS between children
+    lastChildbirthDay: -Infinity, // enforces the demographic birth interval between children
     age: 0,               // in days — overridden explicitly at both entry points (spawnNPC for the starting village, graduateChild for maturing children), since 0 would wrongly mean "just born" for a founding adult
     naturalLifespanDays: rng.float(OLD_AGE_MIN_DOGYEARS, OLD_AGE_MAX_DOGYEARS) * DOG_YEAR_DAYS, // sampled once per NPC so deaths spread out rather than clustering
     starvingDays: 0,      // consecutive days at/below NEEDS.food.starvationFloor — see tickAgingAndDeaths

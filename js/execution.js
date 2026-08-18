@@ -4,11 +4,8 @@ import { bumpAffinity, logEvent, world } from './state.js';
 import { completeConstruction } from './construction.js';
 import { TINKER_SKILL_CEILING } from './actions.js';
 import { attemptChildbirth } from './marriage.js';
-import { applyBdiDayIfEnabled } from './scheduleBdi.js';
 
 export function executeSchedule(npc) {
-  applyBdiDayIfEnabled(npc);
-
   for (const action of npc.schedule) {
     if (action.id === 'work') {
       let fillRatio = 1;

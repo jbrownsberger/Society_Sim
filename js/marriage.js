@@ -52,7 +52,12 @@ export const MAX_CHILDREN_PER_COUPLE = 5;   // familyChannelTarget's diminishing
 // here, since constants.js transitively imports this file (via npc.js) and
 // referencing CHILDHOOD_DAYS at this module's top level would read it
 // before constants.js's own top-level body has run.
-export const MIN_BIRTH_SPACING_DAYS = 60; // real gap between children — without this, a couple would have all 5 kids within the same handful of days the moment they married, since nothing else throttled it
+// A family can reconsider after a little over one dog-year. Compute this at
+// decision time (rather than module initialization) because this module
+// participates in the NPC/constants import cycle.
+export function minimumBirthSpacingDays() {
+  return DOG_YEAR_DAYS * 1.2;
+}
 export const CHILDBIRTH_MAX_AGE_DOGYEARS = 8; // past this, seek_child is no longer offered at all
 export const STARVATION_DEATH_DAYS = 25; // consecutive days at/below NEEDS.food.starvationFloor before death — a real cliff, not just a scoring penalty
 
@@ -178,8 +183,8 @@ export function attemptChildbirth(npc) {
   if (npc.childIds.length >= MAX_CHILDREN_PER_COUPLE) return;
   if (npc.age >= CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS) return;
   if (spouse.age >= CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS) return;
-  if ((world.day - npc.lastChildbirthDay) < MIN_BIRTH_SPACING_DAYS) return;
-  if ((world.day - spouse.lastChildbirthDay) < MIN_BIRTH_SPACING_DAYS) return;
+  if ((world.day - npc.lastChildbirthDay) < minimumBirthSpacingDays()) return;
+  if ((world.day - spouse.lastChildbirthDay) < minimumBirthSpacingDays()) return;
   const combinedSavings = npc.savings + spouse.savings;
   if (combinedSavings < CHILDBIRTH_MATERIAL_COST) return;
   const share = Math.min(npc.savings, CHILDBIRTH_MATERIAL_COST / 2);
@@ -261,4 +266,3 @@ export function graduateChild(child) {
   world.npcs.set(npc.id, npc);
   logEvent(`${npc.name} comes of age and starts an independent life.`, [npc.id, ...(npc.parentIds || [])]);
 }
-

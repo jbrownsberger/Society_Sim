@@ -36,6 +36,14 @@ export const MARKET_MAX_HAGGLE    = 3;    // cap on purely dividend-seeking extr
 export const MARKET_ENERGY_PER_HOUR = 2;  // lighter than manual labor
 export const MARKET_DISUTILITY_PER_HOUR = 1; // ditto — standing around is tiring, not backbreaking
 
+function isInputForOwnedAsset(npc, good) {
+  return npc.ownedAssets.some(assetId => {
+    const asset = world.assets.get(assetId);
+    const profId = asset && ASSET_TYPES[asset.type]?.profession;
+    return profId && (PROFESSIONS[profId]?.inputs?.[good] ?? 0) > 0;
+  });
+}
+
 export function planMarketVisit(npc) {
   const lam = lambda(npc);
   let sellQty = 0, buyQty = 0, sellRevenue = 0, buyCost = 0;
@@ -95,12 +103,26 @@ export function planMarketVisit(npc) {
     if (deficit <= 0.1) continue;
     const perUnitValue = shadowPriceGood(npc, good);
     const askPrice = Math.max(marketAsk(good), 0.01);
-    if (perUnitValue <= askPrice * lam) continue; // not worth buying at any quantity
+    const isFood = GOODS[good].nutrition > 0;
+    const isProductionInput = isInputForOwnedAsset(npc, good);
+    // Food is not a discretionary investment.  The live exchange already
+    // buys an attendee's food deficit whenever they can pay; allowing the
+    // BDI forecast to reject that same purchase created a false plan where
+    // a hungry household with cash and stocked shelves scheduled no market
+    // visit at all. Other goods still need to clear their shadow value.
+    if (!isFood && !isProductionInput && perUnitValue <= askPrice * lam) continue;
     const stockAvailable = Math.max(0, world.market.goods[good]?.stock ?? 0);
     if (stockAvailable < 0.1) continue; // nothing to buy regardless of money
-    candidates.push({ good, deficit, askPrice, stockAvailable, valuePerCoin: perUnitValue / askPrice });
+    candidates.push({ good, deficit, askPrice, stockAvailable, isFood, isProductionInput, valuePerCoin: perUnitValue / askPrice });
   }
-  candidates.sort((a, b) => b.valuePerCoin - a.valuePerCoin);
+  // Match the real exchange's survival-first ordering: food is purchased
+  // before an optional capital or comfort good can consume the budget.
+  candidates.sort((a, b) =>
+    Number(b.isFood) - Number(a.isFood) ||
+    (GOODS[b.good].nutrition ?? 0) - (GOODS[a.good].nutrition ?? 0) ||
+    Number(b.isProductionInput) - Number(a.isProductionInput) ||
+    b.valuePerCoin - a.valuePerCoin
+  );
 
   const spendableSavings = npc.needs.food < 0.2
     ? npc.savings
@@ -161,17 +183,28 @@ export function planMarketVisit(npc) {
 // dominant source, by design.
 export const CHURCH_DURATION = 2;
 export const CHURCH_ENERGY   = 3;
-export const TITHE_RATE = 0.06;  // fraction of savings tithed per visit
-export const TITHE_CAP  = 15;    // ceiling so a single very rich NPC can't be taxed absurdly in one sitting
+export const TITHE_RATE = 0.02;  // a recurring voluntary contribution, not a confiscatory levy
+export const TITHE_CAP  = 5;
 
 export function planChurchVisit(npc) {
   const tithe = Math.min(Math.max(0, npc.savings) * TITHE_RATE, TITHE_CAP);
+  const devotionalValue = needMarginalUtility(npc, 'meaning') * 0.6
+    + needMarginalUtility(npc, 'social') * 0.08;
+  // Giving is a social/meaningful act in itself: the donor still bears a
+  // portion of the opportunity cost, but does not experience a voluntary
+  // tithe as a purely instrumental loss. Hunger and acute discomfort take
+  // precedence over worship, so this is not a scripted escape from crisis.
+  const solidarityValue = tithe * lambda(npc) * 0.75;
+  const foodPressure = Math.max(0, 0.35 - npc.needs.food) / 0.35;
+  const comfortPressure = Math.max(0, 0.2 - npc.needs.comfort) / 0.2;
+  const hardshipPenalty = devotionalValue * (foodPressure * 2 + comfortPressure);
   return {
     id: 'church', label: 'Attend Church',
     duration: CHURCH_DURATION,
     energyCost: CHURCH_ENERGY,
     needEffects: { meaning: 0.35, social: 0.08 },
     moneyCost: tithe,
+    _scoreOverride: devotionalValue + solidarityValue - tithe * lambda(npc) - hardshipPenalty,
   };
 }
 
@@ -595,4 +628,3 @@ export function planConstructionAction(npc) {
     _scoreOverride: perHourUtility * sessionHours - energyCost * 0.05 - LABOR_DISUTILITY * sessionHours,
   };
 }
-

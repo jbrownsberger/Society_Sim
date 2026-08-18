@@ -21,11 +21,25 @@ export const BDI_ADOPTION_FRACTION = 1;
 // scheduler. They are deliberately local and side-effect free: market and
 // relationship changes are only made when a real intention executes.
 function applyProjectionEffects(sim, action) {
-  for (const [good, quantity] of Object.entries(action.goodsConsumed ?? {})) {
-    sim.inventory[good] = Math.max(0, (sim.inventory[good] ?? 0) - quantity);
-  }
-  for (const [good, quantity] of Object.entries(action.goodsProduced ?? {})) {
-    sim.inventory[good] = (sim.inventory[good] ?? 0) + quantity;
+  // A wage worker receives the wage, not the employer's output; similarly,
+  // the employer supplies the inputs. Execution already applies those goods
+  // to the employer. Projecting them into the worker's inventory made the
+  // hill-climber believe a mill hand had acquired bread directly, so it
+  // could rationally cut market time even though the live household had no
+  // bread at all.
+  const employerOwnsProduction = action.id === 'hired-labor';
+  if (!employerOwnsProduction) {
+    let fillRatio = 1;
+    for (const [good, quantity] of Object.entries(action.goodsConsumed ?? {})) {
+      if (quantity > 0) fillRatio = Math.min(fillRatio, (sim.inventory[good] ?? 0) / quantity);
+    }
+    fillRatio = Math.max(0, Math.min(1, fillRatio));
+    for (const [good, quantity] of Object.entries(action.goodsConsumed ?? {})) {
+      sim.inventory[good] = Math.max(0, (sim.inventory[good] ?? 0) - quantity * fillRatio);
+    }
+    for (const [good, quantity] of Object.entries(action.goodsProduced ?? {})) {
+      sim.inventory[good] = (sim.inventory[good] ?? 0) + quantity * fillRatio;
+    }
   }
   sim.savings += action.moneyEarned ?? 0;
   sim.savings -= action.moneyCost ?? 0;
@@ -96,10 +110,8 @@ export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHou
   const restHours = weekSchedule.rest * dayFraction;
   const leisureHours = weekSchedule.leisure * dayFraction;
 
-  const hire = bdiHiredLaborAction(sim);
-  if (hire && dayWorkHours > 0.1) {
-    actions.push({ ...hire, duration: dayWorkHours });
-  } else if (dayWorkHours > 0.1) {
+  let selfWork = null;
+  if (dayWorkHours > 0.1) {
     const { workAs } = workSessionEV(sim);
     if (workAs) {
       const prof = PROFESSIONS[workAs];
@@ -112,15 +124,41 @@ export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHou
       for (const [g, qty] of Object.entries(prof.inputs)) {
         goodsConsumed[g] = qty * (dayWorkHours / prof.laborHours);
       }
-      actions.push({
+      selfWork = {
         id: 'work',
         duration: dayWorkHours,
         energyCost: 25 * (dayWorkHours / 6),
         goodsProduced,
         goodsConsumed,
         isLabor: true,
-      });
+      };
     }
+  }
+  const hire = bdiHiredLaborAction(sim);
+  if (hire && dayWorkHours > 0.1) {
+    const fraction = dayWorkHours / hire.duration;
+    const scaledHire = {
+      ...hire,
+      duration: dayWorkHours,
+      energyCost: hire.energyCost * fraction,
+      wage: hire.wage * fraction,
+      moneyEarned: hire.moneyEarned * fraction,
+      goodsProduced: Object.fromEntries(Object.entries(hire.goodsProduced).map(([g, q]) => [g, q * fraction])),
+      goodsConsumed: Object.fromEntries(Object.entries(hire.goodsConsumed).map(([g, q]) => [g, q * fraction])),
+    };
+    // Owning an asset is not a ban on selling labor. A worker compares the
+    // wage against the value of operating their own asset; employer output
+    // is deliberately omitted from the worker's score.
+    const hireForWorker = { ...scaledHire };
+    delete hireForWorker.goodsProduced;
+    delete hireForWorker.goodsConsumed;
+    if (!selfWork || scoreAction(hireForWorker, sim) > scoreAction(selfWork, sim)) {
+      actions.push(scaledHire);
+    } else {
+      actions.push(selfWork);
+    }
+  } else if (selfWork) {
+    actions.push(selfWork);
   }
   if (marketHours > 0.1) {
     // Trading settles once per visit in the live market. Reuse the same
@@ -264,6 +302,13 @@ export function applyBdiDayIfEnabled(npc) {
   }
 
   npc.schedule = chosen;
+  // Offers clear daily and capacity is finite. Reserve a slot as soon as
+  // this BDI plan commits, before later NPCs choose from the same market.
+  for (const action of chosen) {
+    if (action.id === 'hired-labor' && action._wageOfferRef) {
+      action._wageOfferRef.slotsRemaining = Math.max(0, action._wageOfferRef.slotsRemaining - 1);
+    }
+  }
   npc.bdi = {
     ...(npc.bdi ?? {}),
     intentions: chosen.map(action => ({

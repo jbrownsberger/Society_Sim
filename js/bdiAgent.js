@@ -1,13 +1,14 @@
-import { ASSET_TYPES, MAX_FARMS, NEEDS, PRODUCTIVE_ASSET_TYPES, PROFESSIONS, countAssetsOfType, countNpcsInProfession, hasWorkableAsset, housingQuality } from './constants.js';
+import { ASSET_TYPES, MAX_FARMS, NEEDS, PRODUCTIVE_ASSET_TYPES, PROFESSIONS, SEASONAL_GRAIN, buildingProductivity, countAssetsOfType, countNpcsInProfession, hasWorkableAsset, housingQuality } from './constants.js';
 import { getAffinity, world } from './state.js';
 import { expectedPrice, lambda } from './prices.js';
 import { computeConstructionEV, startConstruction } from './construction.js';
-import { planAssetSaleActions, planConstructionAction, planTinkerAction } from './actions.js';
-import { CHILDBIRTH_DRIVE_BONUS, CHILDBIRTH_MATERIAL_COST, CHILDBIRTH_MAX_AGE_DOGYEARS, CHILDBIRTH_UTILITY_COST, MARRIAGE_DRIVE_BONUS, MAX_CHILDREN_PER_COUPLE, MIN_BIRTH_SPACING_DAYS, childbirthUtilityGain, marriageUtilityGain } from './marriage.js';
+import { planAssetSaleActions, planChurchVisit, planConstructionAction, planTinkerAction } from './actions.js';
+import { CHILDBIRTH_DRIVE_BONUS, CHILDBIRTH_MATERIAL_COST, CHILDBIRTH_MAX_AGE_DOGYEARS, CHILDBIRTH_UTILITY_COST, MARRIAGE_DRIVE_BONUS, MAX_CHILDREN_PER_COUPLE, childbirthUtilityGain, marriageUtilityGain, minimumBirthSpacingDays } from './marriage.js';
 import { DOG_YEAR_DAYS } from './constants.js';
 import { bestWageOffer } from './labor.js';
 import { YEAR_LENGTH } from './npc.js';
 import { STARVATION_MIN_TENURE, STARVING_FOOD_THRESHOLD, SWITCH_PAYBACK_HORIZON, maxSwitchesPerDay, planProfessionSwitch } from './memory.js';
+import { effectiveSkill } from './death.js';
 
 /** Beliefs only — not a live argmax. */
 export function believedTradeValue(npc, profId) {
@@ -25,7 +26,14 @@ export function bdiReconsiderProfession(npc) {
   let vacant = null;
   for (const profId of Object.keys(PROFESSIONS)) {
     if (profId === current) continue;
-    if (countNpcsInProfession(profId) === 0 && hasWorkableAsset(npc, profId)) {
+    // An inherited or auctioned asset may be owned but not currently set as
+    // this NPC's primary asset. In a vacant essential trade, restoring that
+    // existing productive capacity is a valid BDI intention; requiring it
+    // to already be primary made an all-woodcutter collapse irreversible.
+    const ownedMatchingAsset = npc.ownedAssets
+      .map(id => world.assets.get(id))
+      .find(asset => asset && !asset.forSale && ASSET_TYPES[asset.type].profession === profId);
+    if (countNpcsInProfession(profId) === 0 && ownedMatchingAsset) {
       if (!vacant || believedTradeValue(npc, profId) > believedTradeValue(npc, vacant)) vacant = profId;
     }
   }
@@ -121,12 +129,31 @@ function adoptProfession(npc, bestAlt, plan) {
 }
 
 export function bdiHiredLaborAction(npc) {
+  // Hired work is still physical work. Match workSessionEV's feasibility
+  // rule so an exhausted NPC rests instead of occupying a paid slot and
+  // delivering effectively zero output through the energy multiplier.
+  if (npc.energy < 20) return null;
   const offer = bestWageOffer(npc);
   if (!offer) return null;
-  if (hasWorkableAsset(npc, npc.profession)) return null;
   const employer = world.npcs.get(offer.employerId);
   const laborProf = PROFESSIONS[offer.profId];
   if (!laborProf) return null;
+  // This is the employer's production session. The worker earns only the
+  // wage, but execution credits these goods (and charges these inputs) to
+  // the employer. Without this payload, BDI hires consumed a work day while
+  // producing nothing — particularly destructive for milling.
+  const skill = effectiveSkill(npc, offer.profId);
+  const buildingMod = buildingProductivity(offer.profId);
+  const seasonal = offer.profId === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
+  const energyMod = npc.energy / 100;
+  const goodsProduced = {};
+  const goodsConsumed = {};
+  for (const [good, quantity] of Object.entries(laborProf.outputs)) {
+    goodsProduced[good] = quantity * skill * buildingMod * seasonal * energyMod;
+  }
+  for (const [good, quantity] of Object.entries(laborProf.inputs)) {
+    goodsConsumed[good] = quantity;
+  }
   return {
     id: 'hired-labor',
     label: `Hired labor (${laborProf.name}${employer ? ' for ' + employer.name : ''})`,
@@ -135,6 +162,8 @@ export function bdiHiredLaborAction(npc) {
     energyCost: 25,
     wage: offer.wage,
     moneyEarned: offer.wage,
+    goodsProduced,
+    goodsConsumed,
     employerId: offer.employerId,
     assetId: offer.assetId,
     _wageOfferRef: offer,
@@ -165,6 +194,10 @@ export function bdiPlane2Actions(npc) {
 
   actions.push(...planAssetSaleActions(npc));
 
+  // Church is a durable meaning/community intention. Its own BDI score
+  // accounts for the tithe and yields to hunger or acute discomfort.
+  actions.push(planChurchVisit(npc));
+
   if (!crisis) {
     const tinker = planTinkerAction(npc);
     if (tinker) actions.push(tinker);
@@ -183,23 +216,32 @@ export function bdiPlane2Actions(npc) {
 
   if (npc.spouseId != null && npc.id < npc.spouseId) {
     const spouse = world.npcs.get(npc.spouseId);
+    // Couples form a public belief about whether the village can provision
+    // another dependent from the market. The Market's normal bread reserve
+    // is the reference point, so this is a continuous confidence signal,
+    // not a household-stock threshold or a population cap.
+    const breadMarket = world.market.goods.bread;
+    const foodConfidence = breadMarket
+      ? Math.min(1, Math.max(0, breadMarket.stock / Math.max(1, breadMarket.targetStock)))
+      : 0;
     if (spouse && npc.childIds.length < MAX_CHILDREN_PER_COUPLE &&
         npc.energy > 40 && spouse.energy > 40 &&
         npc.needs.food > 0.5 && spouse.needs.food > 0.5 &&
         npc.age < CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS &&
         spouse.age < CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS &&
-        (world.day - npc.lastChildbirthDay) >= MIN_BIRTH_SPACING_DAYS &&
-        (world.day - spouse.lastChildbirthDay) >= MIN_BIRTH_SPACING_DAYS &&
+        (world.day - npc.lastChildbirthDay) >= minimumBirthSpacingDays() &&
+        (world.day - spouse.lastChildbirthDay) >= minimumBirthSpacingDays() &&
         (npc.savings + spouse.savings) > CHILDBIRTH_MATERIAL_COST * 3) {
-      const gain = childbirthUtilityGain(npc) + childbirthUtilityGain(spouse) + CHILDBIRTH_DRIVE_BONUS;
-      if (gain > CHILDBIRTH_UTILITY_COST) {
+      const familyGain = childbirthUtilityGain(npc) + childbirthUtilityGain(spouse) + CHILDBIRTH_DRIVE_BONUS;
+      const expectedUtility = familyGain * foodConfidence - CHILDBIRTH_UTILITY_COST;
+      if (expectedUtility > 0) {
         actions.push({
           id: 'seek_child',
           label: 'Try for a child',
           duration: 1,
           energyCost: 10,
           needEffects: {},
-          _scoreOverride: gain - CHILDBIRTH_UTILITY_COST,
+          _scoreOverride: expectedUtility,
         });
       }
     }

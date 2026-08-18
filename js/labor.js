@@ -58,6 +58,19 @@ export function marginalHireValue(owner, asset) {
   return Math.max(0, revenue - inputCost);
 }
 
+// The live executor can only turn inputs already held by the employer into
+// output; it does not buy grain or wood in the middle of a work session.
+// Labor demand must use that same feasibility condition. Otherwise an empty
+// mill or workshop advertises a lucrative job, pays the wage, and produces
+// nothing — a false price signal that pulls workers away from farming.
+function inputSupportedSlots(owner, prof, capacity) {
+  let slots = capacity;
+  for (const [good, quantity] of Object.entries(prof.inputs)) {
+    if (quantity > 0) slots = Math.min(slots, Math.floor((owner.inventory[good] ?? 0) / quantity));
+  }
+  return Math.max(0, slots);
+}
+
 // ─────────────────────────────────────────────
 // LABOR MARKET — per-profession clearing wage (replaces the old
 // "everyone scans the whole village for the single highest wage"
@@ -92,11 +105,13 @@ export function postWageOffers() {
       const asset = world.assets.get(assetId);
       if (!asset || asset.forSale) continue;
       const currentWorkers = (asset.employedLaborIds?.length ?? 0) + (owner.primaryAsset === asset.id ? 1 : 0);
-      const spareCapacity = asset.capacity - currentWorkers;
+      const physicalCapacity = asset.capacity - currentWorkers;
+      const profId = ASSET_TYPES[asset.type].profession;
+      const prof = PROFESSIONS[profId];
+      const spareCapacity = prof ? inputSupportedSlots(owner, prof, physicalCapacity) : 0;
       if (spareCapacity <= 0) continue;
       const marginalValue = marginalHireValue(owner, asset);
       if (marginalValue <= 0) continue;
-      const profId = ASSET_TYPES[asset.type].profession;
       (demandByProf[profId] ??= []).push({
         assetId: asset.id, employerId: owner.id, marginalValue,
         maxAffordable: owner.savings, slotsRemaining: spareCapacity,
@@ -172,5 +187,4 @@ export function bestWageOffer(npc) {
 }
 
 // (hiring decision is made directly inside buildSchedule's Pass 1, not as a separate scored action)
-
 

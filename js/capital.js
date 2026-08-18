@@ -25,13 +25,12 @@ export function decayPerishables() {
 
 
 
-// The Market learns its own scale from experience: if a good keeps running
-// out (repeated unmet demand), that's a granary that's too small for how
-// this village actually consumes — the target stock (and capacity, which
-// tracks it proportionally) grows to match. If a good keeps piling up
-// unsold (repeated unmet supply — a glut the Market won't absorb), the
-// target shrinks back down. Either way this is gradual: one bad day
-// doesn't resize a warehouse, a week-plus of a consistent pattern does.
+// The Market learns its storage scale from experience. Its target stock is
+// the economically meaningful two-day consumption reserve used by pricing;
+// storage capacity is merely infrastructure. Letting a shortage raise both
+// caused a feedback loop where the price denominator itself grew after every
+// stockout, turning a recoverable bread shortfall into a permanent price
+// spike. Capacity can adapt without rewriting what normal availability means.
 export const STREAK_THRESHOLD = 7;   // consecutive days of real pressure before adapting
 export const ADAPT_STEP = 0.12;      // proportional resize per adaptation event
 
@@ -46,13 +45,11 @@ export function adaptMarketStockTargets() {
     g.glutStreak     = glut     ? g.glutStreak + 1     : 0;
 
     if (g.shortageStreak >= STREAK_THRESHOLD) {
-      g.targetStock = Math.min(g.targetStockMax, g.targetStock * (1 + ADAPT_STEP));
-      g.capacity    = g.targetStock * g.capacityRatio;
+      g.capacity = Math.min(g.targetStockMax * g.capacityRatio, g.capacity * (1 + ADAPT_STEP));
       g.shortageStreak = 0;
       logEvent(`The Market expands its ${GOODS[good].name.toLowerCase()} storage — demand has outstripped supply for weeks.`);
     } else if (g.glutStreak >= STREAK_THRESHOLD) {
-      g.targetStock = Math.max(g.targetStockMin, g.targetStock * (1 - ADAPT_STEP));
-      g.capacity    = g.targetStock * g.capacityRatio;
+      g.capacity = Math.max(g.targetStockMin * g.capacityRatio, g.capacity * (1 - ADAPT_STEP));
       g.glutStreak = 0;
     }
   }

@@ -57,6 +57,11 @@ export function profSessionEV(npc, profId, ignoreAssetGate) {
   let inputCashCost = 0;
   for (const [g, qty] of Object.entries(prof.inputs)) {
     const shortfall = Math.max(0, qty - (npc.inventory[g] ?? 0));
+    // A downstream trade cannot turn a high output price into real output
+    // when its missing input is absent from the market. This is especially
+    // important to recovery: otherwise a bread shortage makes a new mill
+    // look profitable even after the village has run out of grain.
+    if (shortfall > 0 && (world.market.goods[g]?.stock ?? 0) + 0.01 < shortfall) return -Infinity;
     inputCashCost += shortfall * marketAsk(g);
   }
 
@@ -72,4 +77,3 @@ export function profSessionEV(npc, profId, ignoreAssetGate) {
 // A broke miller doesn't rest — they help with the harvest until they can
 // afford grain again. The NPC keeps their profession identity; this is
 // casual day-labour, not a switch.
-

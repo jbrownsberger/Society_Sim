@@ -235,7 +235,12 @@ export function hasWorkableAsset(npc, profId) {
 export const PROFESSIONS = {
   farmer:     { name:'Farmer',     outputs:{grain:8},  inputs:{},          requires:null,      capitalGood:'tools', laborHours:8, materialsCost:3,  trainingCost:0,  trainingDays:5  }, // output 5->8: worked backward from the target — a 48-person village needs ~96 bread/day (2/person), which needs ~32 grain/day (4 grain -> 12 bread via milling). If 1/4 of total village hours go to farming (half the time of half the people — 72 of 288 daily village-hours at pop 48), that's 72/6=12 sessions/day. At the OLD output of 5 grain/session that's 60 grain/day (already ~2x need on paper), but per-hour revenue was too thin to make farming competitive against a specialized miller's capital-boosted margin — see profSessionEV. At 8 grain/session, the same 12 sessions produce 96 grain/day (3x need) AND farming's per-hour revenue rises proportionally, directly narrowing the gap against milling in the EV comparison that was driving the specialist trap.
   woodcutter: { name:'Woodcutter', outputs:{wood:4},   inputs:{},          requires:null,      capitalGood:'tools', laborHours:8, materialsCost:3,  trainingCost:0,  trainingDays:5  },
-  miller:     { name:'Miller',     outputs:{bread:12}, inputs:{grain:4},   requires:'mill',    capitalGood:null,    laborHours:7, materialsCost:10, trainingCost:15, trainingDays:20 }, // output doubled 6->12: mills were structurally undersized relative to village-wide bread demand
+  // Milling keeps the same 3:1 physical conversion (16 grain -> 48 bread)
+  // while representing the much higher throughput of a dedicated mill. At
+  // the observed spike, nine farmers had grain but one active miller had to
+  // supply the whole village; an owner plus one hire can now cover ordinary
+  // village demand without creating food from nowhere.
+  miller:     { name:'Miller',     outputs:{bread:48}, inputs:{grain:16},  requires:'mill',    capitalGood:null,    laborHours:7, materialsCost:10, trainingCost:15, trainingDays:20 },
   toolmaker:  { name:'Toolmaker',  outputs:{tools:0.5},inputs:{wood:2},    requires:'forge',   capitalGood:null,    laborHours:8, materialsCost:15, trainingCost:20, trainingDays:25 },
   artisan:    { name:'Artisan',    outputs:{luxury:4}, inputs:{grain:2,wood:3}, requires:'workshop', capitalGood:null, laborHours:7, materialsCost:15, trainingCost:25, trainingDays:25 },
 };
@@ -377,7 +382,7 @@ export const NEEDS = {
   // wide margin, making it nearly irrelevant to any decision. With family
   // now feeding it a real trickle (see familyChannelTarget), it's worth
   // it actually mattering in the scoring.
-  meaning:  { weight:20,  decayPerDay:0.01,  starvationFloor:0,    critical:false, selfManaged:false },
+  meaning:  { weight:20,  decayPerDay:0.01,  starvationFloor:0,    critical:false, selfManaged:false, enduring:true },
   // Prestige: standing in the village, from wealth, owned productive
   // assets, and the skill tier of one's profession. selfManaged:true —
   // it has one complete convergence-toward-target update in satisfyNeeds
@@ -411,7 +416,9 @@ export const FAMILY_MEANING_RATE = 0.02; // daily meaning trickle, scaled by fam
 // Moved up from the marriage/childbirth section below: makeNPC (called
 // during initial world seeding, well before that section of the file
 // runs) needs these to set every NPC's lifespan at creation.
-export const CHILDHOOD_DAYS = 150; // "dog years" for now — 3 (fast) years at 50 days/year, so multi-generational dynamics are actually observable in a normal test run. Trivial to dial back up to a realistic childhood once the mechanics are validated.
+// Dog-year demographic clock: children mature quickly enough for several
+// generations to be observable during a normal simulation run.
+export const CHILDHOOD_DAYS = 150;
 export const DOG_YEAR_DAYS = CHILDHOOD_DAYS / 3; // for age display — a child "turns 1" every DOG_YEAR_DAYS days
 export const OLD_AGE_MIN_DOGYEARS = 10; // each NPC's actual lifespan is sampled once (see makeNPC) between these two, so deaths spread out naturally instead of everyone dying in the same week
 export const OLD_AGE_MAX_DOGYEARS = 12;
@@ -470,7 +477,12 @@ export function needMarginalUtility(npc, need) {
   const cfg = NEEDS[need];
   if (!cfg) return 0;
   const level = npc.needs[need] ?? 0;
-  let mu = cfg.weight / (1 + level);
+  // Meaning is a continuing vocation rather than a deficit that disappears
+  // once a meter is full. It retains a substantial baseline pull, while all
+  // other needs keep the normal diminishing-return shape.
+  let mu = cfg.enduring
+    ? cfg.weight * (0.45 + 0.55 / (1 + level))
+    : cfg.weight / (1 + level);
   if (cfg.starvationFloor > 0 && level < cfg.starvationFloor) {
     const severity = (cfg.starvationFloor - level) / cfg.starvationFloor; // 0..1
     mu *= 1 + severity * 3; // up to ~4x at the very bottom

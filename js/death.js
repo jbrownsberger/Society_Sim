@@ -1,10 +1,10 @@
 import { clamp } from './utils.js';
-import { BUFFER_STOCK_EFFECTS, DOG_YEAR_DAYS, NEEDS, PRESTIGE_HELP_GAIN, PROFESSIONS, WORK_SESSION_HOURS, findStructureByAssetId, housingQuality, recordStructureTransfer, shouldKeepForConsumption } from './constants.js';
+import { ASSET_TYPES, BUFFER_STOCK_EFFECTS, DOG_YEAR_DAYS, NEEDS, PRESTIGE_HELP_GAIN, PROFESSIONS, WORK_SESSION_HOURS, findStructureByAssetId, housingQuality, recordStructureTransfer, shouldKeepForConsumption } from './constants.js';
 import { getAffinity, logEvent, world } from './state.js';
 import { expectedPrice, lambda, marketAsk, speculativeCarryValue } from './prices.js';
 import { profSessionEV } from './valuation.js';
 import { planAssetSaleActions, planChurchVisit, planConstructionAction, planMarketVisit, planTinkerAction } from './actions.js';
-import { CHILDBIRTH_DRIVE_BONUS, CHILDBIRTH_MATERIAL_COST, CHILDBIRTH_MAX_AGE_DOGYEARS, CHILDBIRTH_UTILITY_COST, MARRIAGE_DRIVE_BONUS, MAX_CHILDREN_PER_COUPLE, MIN_BIRTH_SPACING_DAYS, STARVATION_DEATH_DAYS, childbirthUtilityGain, marriageUtilityGain } from './marriage.js';
+import { CHILDBIRTH_DRIVE_BONUS, CHILDBIRTH_MATERIAL_COST, CHILDBIRTH_MAX_AGE_DOGYEARS, CHILDBIRTH_UTILITY_COST, MARRIAGE_DRIVE_BONUS, MAX_CHILDREN_PER_COUPLE, STARVATION_DEATH_DAYS, childbirthUtilityGain, marriageUtilityGain, minimumBirthSpacingDays } from './marriage.js';
 import { executeSchedule } from './execution.js';
 import { householdFoodUnits } from './needs.js';
 
@@ -184,8 +184,8 @@ export function getAvailableActions(npc) {
         npc.needs.food > 0.5 && spouse.needs.food > 0.5 &&
         npc.age < CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS &&
         spouse.age < CHILDBIRTH_MAX_AGE_DOGYEARS * DOG_YEAR_DAYS &&
-        (world.day - npc.lastChildbirthDay) >= MIN_BIRTH_SPACING_DAYS &&
-        (world.day - spouse.lastChildbirthDay) >= MIN_BIRTH_SPACING_DAYS &&
+        (world.day - npc.lastChildbirthDay) >= minimumBirthSpacingDays() &&
+        (world.day - spouse.lastChildbirthDay) >= minimumBirthSpacingDays() &&
         (npc.savings + spouse.savings) > CHILDBIRTH_MATERIAL_COST * 3) {
       const gain = childbirthUtilityGain(npc) + childbirthUtilityGain(spouse) + CHILDBIRTH_DRIVE_BONUS;
       actions.push({
@@ -390,8 +390,18 @@ export function getBufferTarget(npc, good) {
     // look like. A deeper working buffer means millers keep bidding for
     // grain more of the time, which is what correctly bids grain's price
     // up and rewards farmers for producing more of it.
-    const grainInput = PROFESSIONS[prof]?.inputs?.grain;
-    const base = grainInput ? grainInput * 5 : 1;
+    const grainInput = PROFESSIONS[prof]?.inputs?.grain ?? 0;
+    // An owner may staff a mill rather than operate it personally. They
+    // still need to carry the mill's grain, otherwise the labor market can
+    // never offer a productive hired-miller position. Size the same rolling
+    // buffer to the largest owned grain-consuming asset's worker capacity.
+    const ownedInput = npc.ownedAssets.reduce((largest, assetId) => {
+      const asset = world.assets.get(assetId);
+      const assetProf = asset && ASSET_TYPES[asset.type]?.profession;
+      const perSession = assetProf ? (PROFESSIONS[assetProf]?.inputs?.grain ?? 0) : 0;
+      return Math.max(largest, perSession * (asset?.capacity ?? 1));
+    }, 0);
+    const base = Math.max(grainInput, ownedInput) * 5 || 1;
     return base + specUnits;
   }
 
@@ -454,4 +464,3 @@ export function getBufferTarget(npc, good) {
 
   return 0;
 }
-
