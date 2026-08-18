@@ -488,6 +488,7 @@ export function updateInfraPanel() {
   const el = document.getElementById('infra-status');
   if (!el) return;
   const all = [
+    { type:'farm',     label:'Farm',     unlocks:'Farmer' },
     { type:'mill',     label:'Mill',     unlocks:'Miller' },
     { type:'forge',    label:'Forge',    unlocks:'Toolmaker' },
     { type:'workshop', label:'Workshop', unlocks:'Artisan' },
@@ -520,7 +521,7 @@ export function updateInfraPanel() {
       <div style="display:flex;align-items:center;gap:6px;margin:2px 0 8px 0">
         <input type="range" min="0.2" max="2.0" step="0.05"
           value="${BUILDING_PRODUCTIVITY[s.type]}"
-          oninput="setBuildingProductivity('${s.type}', this.value)"
+          data-productivity-type="${s.type}"
           style="flex:1">
         <span id="prod-label-${s.type}" style="font-size:0.7rem;color:var(--ink-faded);min-width:34px">${BUILDING_PRODUCTIVITY[s.type].toFixed(2)}x</span>
       </div>` : '';
@@ -544,6 +545,10 @@ export function updateInfraPanel() {
     </div>` : '';
 
   el.innerHTML = rows + projectRows;
+  el.querySelectorAll('[data-productivity-type]').forEach(input => {
+    input.addEventListener('input', event => {
+      setBuildingProductivity(event.currentTarget.dataset.productivityType, event.currentTarget.value);
+    });
+  });
 }
-
 

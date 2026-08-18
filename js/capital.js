@@ -1,5 +1,5 @@
 import { GOODS } from './constants.js';
-import { logEvent, world } from './state.js';
+import { marketTargetStock, logEvent, world } from './state.js';
 import { TITHE_CAP, TITHE_RATE } from './actions.js';
 
 // ─────────────────────────────────────────────
@@ -26,7 +26,7 @@ export function decayPerishables() {
 
 
 // The Market learns its storage scale from experience. Its target stock is
-// the economically meaningful two-day consumption reserve used by pricing;
+// the economically meaningful one-week consumption reserve used by pricing;
 // storage capacity is merely infrastructure. Letting a shortage raise both
 // caused a feedback loop where the price denominator itself grew after every
 // stockout, turning a recoverable bread shortfall into a permanent price
@@ -35,6 +35,18 @@ export const STREAK_THRESHOLD = 7;   // consecutive days of real pressure before
 export const ADAPT_STEP = 0.12;      // proportional resize per adaptation event
 
 export function adaptMarketStockTargets() {
+  // The reference reserve follows the living adult population. This updates
+  // the quantity the village needs, rather than treating the founding
+  // population as permanent or changing the target in response to prices.
+  const population = Math.max(1, world.npcs.size);
+  for (const good of Object.keys(GOODS)) {
+    const g = world.market.goods[good];
+    const targetStock = marketTargetStock(good, population);
+    g.targetStock = targetStock;
+    g.targetStockMin = targetStock * 0.4;
+    g.targetStockMax = targetStock * 2;
+  }
+
   for (const good of Object.keys(GOODS)) {
     const g = world.market.goods[good];
     // "Real" pressure — small numerical noise near zero shouldn't count.

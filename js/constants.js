@@ -275,14 +275,20 @@ export const PROFESSIONS = {
 // buildingProductivity() below and its call sites in profSessionEV() and
 // buildSchedule(). Exposed live in the Infrastructure panel via sliders.
 export const BUILDING_PRODUCTIVITY = {
+  farm: 1.0,
   mill: 1.0,
   forge: 1.0,
   workshop: 1.0,
 };
 
 export function buildingProductivity(profId) {
-  const req = PROFESSIONS[profId]?.requires;
-  return req ? (BUILDING_PRODUCTIVITY[req] ?? 1.0) : 1.0;
+  // Farmers own farms even though farming has no unlock gate (`requires`
+  // is null). Resolve the actual workplace asset rather than treating that
+  // field as a productivity key, so every asset-backed profession can be
+  // tuned through the same mechanism.
+  const workplace = Object.entries(ASSET_TYPES)
+    .find(([, asset]) => asset.profession === profId)?.[0];
+  return workplace ? (BUILDING_PRODUCTIVITY[workplace] ?? 1.0) : 1.0;
 }
 
 // ─────────────────────────────────────────────

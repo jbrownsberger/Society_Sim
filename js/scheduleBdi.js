@@ -1,4 +1,4 @@
-import { NEEDS, PROFESSIONS, WORK_SESSION_HOURS, emergencyReplanNeeded, needMarginalUtility } from './constants.js';
+import { NEEDS, PROFESSIONS, SEASONAL_GRAIN, WORK_SESSION_HOURS, buildingProductivity, emergencyReplanNeeded, needMarginalUtility } from './constants.js';
 import { world } from './state.js';
 import { workSessionEV } from './construction.js';
 import { satisfyNeeds } from './needs.js';
@@ -116,10 +116,17 @@ export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHou
     if (workAs) {
       const prof = PROFESSIONS[workAs];
       const skill = effectiveSkill(sim, workAs);
+      const capitalMod = prof.capitalGood
+        ? 1 + Math.log1p(sim.inventory.tools ?? 0) * 0.2
+        : 1;
+      const workplaceMod = buildingProductivity(workAs);
+      const seasonalMod = workAs === 'farmer' ? (SEASONAL_GRAIN[world.season] || 1) : 1;
+      const energyMod = sim.energy / 100;
       const goodsProduced = {};
       const goodsConsumed = {};
       for (const [g, qty] of Object.entries(prof.outputs)) {
-        goodsProduced[g] = qty * skill * (dayWorkHours / prof.laborHours);
+        goodsProduced[g] = qty * skill * capitalMod * workplaceMod * seasonalMod * energyMod
+          * (dayWorkHours / prof.laborHours);
       }
       for (const [g, qty] of Object.entries(prof.inputs)) {
         goodsConsumed[g] = qty * (dayWorkHours / prof.laborHours);

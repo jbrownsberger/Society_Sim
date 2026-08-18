@@ -57,11 +57,15 @@ export const POPULATION = 48;
 export const DAILY_CONSUMPTION_PER_CAPITA = {
   grain: 1.0, bread: 2.0, wood: 0.6, tools: 0.15, luxury: 0.2,
 };
-export const TARGET_STOCK_BUFFER = 2; // days of full village-wide demand held in reserve
+export const TARGET_STOCK_BUFFER = 7; // one week of normal village demand held in reserve
+
+export function marketTargetStock(good, population) {
+  return DAILY_CONSUMPTION_PER_CAPITA[good] * population * TARGET_STOCK_BUFFER;
+}
 
 export function buildMarketGoods(population) {
   const mk = (good, spread) => {
-    const targetStock = DAILY_CONSUMPTION_PER_CAPITA[good] * population * TARGET_STOCK_BUFFER;
+    const targetStock = marketTargetStock(good, population);
     const capacity = targetStock * 3.5; // headroom above target, same ratio the old flat values used
     return makeMarketGood(GOODS[good].baseValue, targetStock, capacity, spread);
   };
@@ -79,19 +83,8 @@ export function makeMarketGood(baseValue, targetStock, capacity, spread) {
     stock: targetStock,
     targetStock,
     targetStockMin: targetStock * 0.4,      // adaptive floor
-    // Adaptive ceiling capped at 2x base (was 4x). At 4x, a good with
-    // chronic real shortage (see bread, whose target ratcheted up via
-    // repeated shortageStreak triggers) could balloon to a buffer far
-    // beyond any real village's storage horizon — bread's target hit 768
-    // units for a ~30-person village, over a YEAR of consumption. Filling
-    // that buffer took so long that by the time it was "full" and price
-    // crashed back to baseline (killing the milling incentive), the
-    // underlying grain shortage hadn't actually stabilized — creating a
-    // boom-bust cycle where production collapsed right as the next
-    // shortage was about to hit. A tighter ceiling means price recovers
-    // to a shortage signal faster and holds it longer relative to actual
-    // production capacity, instead of one enormous slow-building buffer
-    // that masks the recurring underlying imbalance for months at a time.
+    // Storage may expand to twice the normal reserve, but shortages never
+    // rewrite the normal-reserve definition used by price formation.
     targetStockMax: targetStock * 2,        // adaptive ceiling
     capacityRatio: capacity / targetStock,  // capacity always scales with target
     capacity,
@@ -254,4 +247,3 @@ export function seedKinshipAffinity(aId, bId) {
     rec.familiarity = Math.max(rec.familiarity, 0.3);
   }
 }
-
