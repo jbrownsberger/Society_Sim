@@ -20,6 +20,13 @@ export const BDI_ADOPTION_FRACTION = 1;
 // A household may optimize discretionary time, but it cannot optimize away
 // its access to food. One short market trip each day is the weekly floor.
 export const MIN_WEEKLY_MARKET_HOURS = PLANNING_HORIZON_DAYS;
+// One meaningful visit per day is enough: exchange settles by attendance,
+// not by the number of hours spent standing at the stall.
+export const MAX_WEEKLY_MARKET_HOURS = 16;
+// The base plan's 40 hours/week is intentionally close to a full working
+// household rhythm. A modest floor prevents a temporary leisure/market signal
+// from collapsing the village's food-producing capacity.
+export const MIN_WEEKLY_WORK_HOURS = 35;
 
 // Projection effects belong to the BDI rollout, not the retired calendar
 // scheduler. They are deliberately local and side-effect free: market and
@@ -133,7 +140,9 @@ export function buildShadowDayActions(sim, weekSchedule, dayFraction, dayWorkHou
   if (marketHours > 0.1) {
     const breadPrice = Math.max(marketAsk('bread'), 0.01);
     const affordable = Math.floor(sim.savings / breadPrice);
-    const bought = Math.min(affordable, Math.floor(marketHours * 1.5));
+    // The shadow economy must mirror live execution: a market visit settles
+    // the household's trade once, so extra visit-hours do not buy extra food.
+    const bought = Math.min(affordable, 3);
     actions.push({
       id: 'market',
       duration: marketHours,
@@ -196,8 +205,11 @@ export function scheduleGenerateCandidates(schedule, mv, crisis) {
   const candidates = [];
   for (const [donor, receiver] of pairs) {
     for (const step of deltas) {
-      const donorFloor = donor === 'market' ? MIN_WEEKLY_MARKET_HOURS : 0;
-      if (schedule[donor] - step >= donorFloor) {
+      const donorFloor = donor === 'market' ? MIN_WEEKLY_MARKET_HOURS
+        : donor === 'work' ? MIN_WEEKLY_WORK_HOURS
+        : 0;
+      const receiverCeiling = receiver === 'market' ? MAX_WEEKLY_MARKET_HOURS : Infinity;
+      if (schedule[donor] - step >= donorFloor && schedule[receiver] + step <= receiverCeiling) {
         const s = { ...schedule };
         s[donor] -= step;
         s[receiver] += step;
@@ -214,8 +226,10 @@ export function scheduleGenerateCandidates(schedule, mv, crisis) {
         const takeRest = Math.min(s.rest, step - takeLeisure);
         s.leisure -= takeLeisure;
         s.rest -= takeRest;
-        s.work += step / 2;
-        s.market += step - step / 2;
+        const desiredMarketHours = step / 2;
+        const marketHours = Math.min(desiredMarketHours, Math.max(0, MAX_WEEKLY_MARKET_HOURS - s.market));
+        s.market += marketHours;
+        s.work += step - marketHours;
         candidates.push(s);
       }
     }
@@ -263,12 +277,29 @@ export function applyBdiDayIfEnabled(npc) {
   // provisioning, work, or recovery time. This keeps the daily plan within
   // its fixed budget while still allowing construction, family, and aid.
   const leisure = chosen.find(action => action.id === 'leisure');
+  const rest = chosen.find(action => action.id === 'rest');
+  const extras = bdiPlane2Actions(npc)
+    .map(action => ({ action, value: scoreAction(action, npc) }))
+    .filter(({ value }) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b.value - a.value);
+  const selectedIds = new Set();
+
+  // An already-started project is a durable intention. Reserve its small
+  // daily tranche before optional social/financial actions, taking leisure
+  // first and preserving at least 1.5 hours of ordinary recovery.
+  const build = extras.find(({ action }) => action.id === 'build');
+  if (build && leisure && rest) {
+    const available = leisure.duration + Math.max(0, rest.duration - 1.5);
+    if (build.action.duration <= available + 0.01) {
+      const fromLeisure = Math.min(build.action.duration, leisure.duration);
+      leisure.duration -= fromLeisure;
+      rest.duration -= build.action.duration - fromLeisure;
+      chosen.push({ ...build.action });
+      selectedIds.add('build');
+    }
+  }
+
   if (leisure) {
-    const extras = bdiPlane2Actions(npc)
-      .map(action => ({ action, value: scoreAction(action, npc) }))
-      .filter(({ action, value }) => Number.isFinite(value) && value > 0 && action.duration <= leisure.duration)
-      .sort((a, b) => b.value - a.value);
-    const selectedIds = new Set();
     for (const { action } of extras) {
       if (selectedIds.has(action.id) || action.duration > leisure.duration + 0.01) continue;
       leisure.duration -= action.duration;
@@ -303,6 +334,23 @@ export function seedBdiAdoption() {
 
 export function shadowDeliberateSchedule(npc) {
   if (!npc.shadowSchedule) npc.shadowSchedule = { ...DEFAULT_SHADOW_SCHEDULE };
+  // Repair plans created before the market cap existed. Excess market time
+  // becomes productive time, preserving the weekly time budget exactly.
+  if (npc.shadowSchedule.market > MAX_WEEKLY_MARKET_HOURS) {
+    const excess = npc.shadowSchedule.market - MAX_WEEKLY_MARKET_HOURS;
+    npc.shadowSchedule = { ...npc.shadowSchedule, market: MAX_WEEKLY_MARKET_HOURS, work: npc.shadowSchedule.work + excess };
+  }
+  if (npc.shadowSchedule.work < MIN_WEEKLY_WORK_HOURS) {
+    const shortfall = MIN_WEEKLY_WORK_HOURS - npc.shadowSchedule.work;
+    const leisureShift = Math.min(shortfall, npc.shadowSchedule.leisure);
+    const restShift = shortfall - leisureShift;
+    npc.shadowSchedule = {
+      ...npc.shadowSchedule,
+      work: MIN_WEEKLY_WORK_HOURS,
+      leisure: npc.shadowSchedule.leisure - leisureShift,
+      rest: Math.max(0, npc.shadowSchedule.rest - restShift),
+    };
+  }
   const crisis = emergencyReplanNeeded(npc);
   const planOffset = npc.planOffset ?? (npc.id % PLANNING_HORIZON_DAYS);
   if (!crisis && world.day % PLANNING_HORIZON_DAYS !== planOffset) return;

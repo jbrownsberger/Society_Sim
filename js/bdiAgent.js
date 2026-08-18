@@ -143,7 +143,22 @@ export function bdiPlane2Actions(npc) {
   const crisis = npc.needs.food < NEEDS.food.starvationFloor;
 
   const build = planConstructionAction(npc);
-  if (build) actions.push(build);
+  if (build) {
+    // A six-hour construction block could never fit into the BDI plan's
+    // discretionary window, so projects were begun but remained at 0%.
+    // Commit a smaller daily tranche; the underlying project retains its
+    // progress and will complete through repeated intentions.
+    const duration = Math.min(3, build.duration);
+    const fraction = duration / build.duration;
+    actions.push({
+      ...build,
+      duration,
+      energyCost: (build.energyCost ?? 0) * fraction,
+      _scoreOverride: typeof build._scoreOverride === 'number'
+        ? build._scoreOverride * fraction
+        : build._scoreOverride,
+    });
+  }
 
   actions.push(...planAssetSaleActions(npc));
 
