@@ -225,13 +225,29 @@ export function tickChildren() {
       }
     }
     if (!fed) {
-      const cost = CHILD_FOOD_COST_PER_DAY * (world.market.goods.bread?.askPrice ?? GOODS.bread.baseValue);
+      const breadMarket = world.market.goods.bread;
+      const cost = CHILD_FOOD_COST_PER_DAY * (breadMarket?.askPrice ?? GOODS.bread.baseValue);
       for (const p of parents) {
-        if (p.savings > cost) {
+        // This is a real, last-resort market purchase: the child can only
+        // be fed from stock that exists, and the stock is debited just as
+        // it is for an adult's ordinary market visit (the daily repricing
+        // pass incorporates this late-day purchase on the next day).
+        // The former cash-only debit gave children free bread while leaving
+        // the market shelf full, which systematically understated bread
+        // scarcity and broke the grain-to-bread production margin.
+        if (p.savings >= cost && (breadMarket?.stock ?? 0) >= CHILD_FOOD_COST_PER_DAY) {
           p.savings -= cost;
-          world.market.goods.bread.cash += cost; // emergency bread purchase — same pattern as every other food buy, not a sink
+          breadMarket.cash += cost;
+          breadMarket.stock -= CHILD_FOOD_COST_PER_DAY;
           fed = true; break;
         }
+      }
+      // An unfilled meal due to an empty shelf is genuine physical demand,
+      // and belongs in the price signal. A parent who simply cannot pay is
+      // a distributional problem for alms, not evidence that bread itself
+      // is scarce, so it does not inflate the commodity price.
+      if (!fed && (breadMarket?.stock ?? 0) < CHILD_FOOD_COST_PER_DAY) {
+        breadMarket.unmetDemand += CHILD_FOOD_COST_PER_DAY;
       }
     }
     // If truly neither parent can afford it, nothing further happens yet

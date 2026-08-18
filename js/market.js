@@ -15,17 +15,9 @@ import { effectiveSkill, getBufferTarget } from './death.js';
 // overnight jump. This is what gets recorded to priceHistory and used for
 // forecasting/shadow pricing (expectedPrice) — the "quoted" price.
 //
-// repriceGood() is the live, undamped version of the same formula. It's
-// called after every individual trade inside runMarketExchange so the
-// ask/bid the NEXT NPC sees already reflects the stock the previous NPC
-// just bought or sold. This matters: without it, all 16 NPCs trade
-// against one flat price for the whole day, and if a scarce good (like
-// bread) runs out partway through, whoever landed near the back of that
-// day's random order gets nothing — not because they were poor, but
-// because they were unlucky. With live repricing, the price itself climbs
-// as stock drains, so lagging buyers face a real, rising cost rather than
-// a hard wall of zero stock. Scarcity gets rationed by price, the way the
-// rest of this game's economics already works, instead of by queue order.
+// All trades use that opening quote. If a shelf empties, later shoppers may
+// find no stock, but the scarcity signal enters the next day’s quote through
+// closing inventory and unmet physical demand—not through queue position.
 export function priceForStock(good, stock) {
   const g = world.market.goods[good];
   const base = GOODS[good].baseValue;
@@ -53,27 +45,13 @@ export function priceForStock(good, stock) {
   return base * Math.exp(-PRICE_ELASTICITY * dev);
 }
 
-// TRADE_PRICE_IMPACT controls how much a SINGLE trade is allowed to move
-// the quoted price, as a fraction of the full jump to the new raw target.
-// Previously repriceGood() snapped midPrice straight to priceForStock()
-// after every individual trade with NO damping at all — the smoothing in
-// updateMarketPrices() only ever touched the once-per-day OPENING price,
-// so it did nothing to prevent wild intraday swings as dozens of NPCs
-// bought/sold in sequence within the same market session. Confirmed in
-// testing: bread's midPrice climbed 11.37 -> 20.91 (+84%) across just 19
-// sequential trades in a single day, entirely after that day's smoothed
-// opening price had already been set. Blending each trade's impact by a
-// small fraction, rather than snapping fully, turns that sawtooth into a
-// gradual walk — still responsive to real supply/demand within the day,
-// just not violently so from trade-order alone.
-export const TRADE_PRICE_IMPACT = 0.25;
-
+// The Market posts one quote for the entire day.  Trade changes inventory,
+// and the next day's updateMarketPrices() incorporates that closing stock
+// through the normal damped price-setting rule.  This avoids turning random
+// order within a single market session into apparent price volatility.
 export function repriceGood(good) {
-  const g = world.market.goods[good];
-  const rawTarget = priceForStock(good, g.stock);
-  g.midPrice = g.midPrice * (1 - TRADE_PRICE_IMPACT) + rawTarget * TRADE_PRICE_IMPACT;
-  g.bidPrice = g.midPrice * (1 - g.spread / 2);
-  g.askPrice = g.midPrice * (1 + g.spread / 2);
+  // Kept as a call-site seam for market transactions. Prices deliberately
+  // remain unchanged until the next opening quote.
 }
 
 export function updateMarketPrices() {
@@ -182,6 +160,12 @@ export function runMarketExchange() {
         const affordableQty = spendableSavings / Math.max(g.askPrice, 0.01);
         const stockRoom = Math.max(0, g.stock);
         const qty = Math.min(deficit, affordableQty, stockRoom);
+        // Price is a signal about physical availability.  A household that
+        // wants more than it can afford is evidence of poverty, not a
+        // commodity stockout; treating its entire budget shortfall as
+        // unmet demand made prices rise merely because buyers were poor.
+        // Record only the portion the Market could not physically supply.
+        const physicalShortfall = Math.max(0, deficit - stockRoom);
         if (qty > 0.05) {
           const cost = qty * g.askPrice;
           npc.inventory[good] = (npc.inventory[good] ?? 0) + qty;
@@ -190,7 +174,7 @@ export function runMarketExchange() {
           g.cash  += cost;
           repriceGood(good);
         }
-        if (qty < deficit - 0.05) g.unmetDemand += (deficit - qty);
+        if (physicalShortfall > 0.05) g.unmetDemand += physicalShortfall;
       }
     }
   }
