@@ -6,21 +6,21 @@ import { seedBdiAdoption } from './scheduleBdi.js';
 import { canvas, drawScene, initCanvas } from './render.js';
 import { selection, updateUI } from './ui.js';
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 // INIT — run once, after every module has finished loading, so all the
 // cyclic imports (world/npc/auctions all reference each other) are fully
 // resolved before anything reads them. See initWorld()/initBank() for why
 // this can't just happen at module-load time the way it did in the
 // original single-file version.
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 initBank();
 initWorld();
 seedBdiAdoption();
 initCanvas();
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 // GAME LOOP
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────
 
 export let simTickMs = 0; // paused
 export let accumulator = 0;
@@ -56,6 +56,7 @@ export function gameLoop(ts) {
     let ticks = 0;
     while (accumulator >= simTickMs && ticks < 10) {
       tickDay();
+      shadowDeliberateAll();
       accumulator -= simTickMs;
       ticks++;
     }
@@ -88,8 +89,6 @@ canvas.addEventListener('click', (e) => {
     return;
   }
 
-  // No NPC hit — check structures (simple radius test around each
-  // building's pixel center; good enough at this footprint scale).
   let closestS = null, closestSDist = 18;
   for (const s of world.structures.values()) {
     const d = Math.hypot(s.x - mx, s.y - my);
@@ -103,11 +102,9 @@ canvas.addEventListener('click', (e) => {
   }
 });
 
-// Helpers
-// Initial UI draw and start loop
 updateUI();
 requestAnimationFrame(gameLoop);
-// ── Tab switching ────────────────────────────
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
