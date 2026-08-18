@@ -26,8 +26,7 @@ export function bdiReconsiderProfession(npc) {
   for (const profId of Object.keys(PROFESSIONS)) {
     if (profId === current) continue;
     if (countNpcsInProfession(profId) === 0 && hasWorkableAsset(npc, profId)) {
-      vacant = profId;
-      break;
+      if (!vacant || believedTradeValue(npc, profId) > believedTradeValue(npc, vacant)) vacant = profId;
     }
   }
 
@@ -40,23 +39,26 @@ export function bdiReconsiderProfession(npc) {
   if (!isStarving && npc.trainingDaysLeft > 0) return;
 
   if (!npc.constructionProject) {
+    let bestBuild = null;
     for (const assetType of PRODUCTIVE_ASSET_TYPES) {
       const profId = ASSET_TYPES[assetType].profession;
       if (profId === current) continue;
       if (assetType === 'farm' && countAssetsOfType('farm') >= MAX_FARMS) continue;
       const cev = computeConstructionEV(npc, profId);
-      const margin = 2 + (1 - npc.traits.riskTolerance) * 6;
-      if (cev - currentBelief > margin) {
-        if (startConstruction(npc, assetType)) {
-          npc.memory.daysSinceSwitch = 0;
-          world.switchesToday++;
-        }
-        return;
+      if (!bestBuild || cev > bestBuild.value) bestBuild = { assetType, value: cev };
+    }
+    const margin = 2 + (1 - npc.traits.riskTolerance) * 6;
+    if (bestBuild && bestBuild.value - currentBelief > margin) {
+      if (startConstruction(npc, bestBuild.assetType)) {
+        npc.memory.daysSinceSwitch = 0;
+        world.switchesToday++;
       }
+      return;
     }
   }
 
   const margin = 2 + (1 - npc.traits.riskTolerance) * 6;
+  let bestTrade = null;
   for (const profId of Object.keys(PROFESSIONS)) {
     if (profId === current) continue;
     if (!hasWorkableAsset(npc, profId)) continue;
@@ -64,10 +66,11 @@ export function bdiReconsiderProfession(npc) {
     const plan = planProfessionSwitch(npc, profId);
     const rampLoss = belief * 0.35 * plan.trainingDays;
     const adjusted = belief - (plan.totalCost * lambda(npc) + rampLoss) / SWITCH_PAYBACK_HORIZON;
-    if (adjusted - currentBelief <= margin) continue;
     if (npc.savings < plan.totalCost) continue;
-    adoptProfession(npc, profId, plan);
-    return;
+    if (!bestTrade || adjusted > bestTrade.adjusted) bestTrade = { profId, plan, adjusted };
+  }
+  if (bestTrade && bestTrade.adjusted - currentBelief > margin) {
+    adoptProfession(npc, bestTrade.profId, bestTrade.plan);
   }
 }
 
