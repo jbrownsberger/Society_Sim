@@ -6,6 +6,7 @@ import { satisfyNeeds } from './needs.js';
 import { effectiveSkill } from './death.js';
 import { bdiHiredLaborAction, bdiPlane2Actions } from './bdiAgent.js';
 import { scoreAction } from './prices.js';
+import { planMarketVisit } from './actions.js';
 
 export const SCHEDULE_CATEGORIES = ['work', 'market', 'rest', 'leisure'];
 export const SCHEDULE_N_PAIRS = 2;
@@ -16,6 +17,9 @@ export const DEFAULT_SHADOW_SCHEDULE = { work: 40, market: 15, rest: 25, leisure
 export const DAILY_HOURS = 16;
 export const PLANNING_HORIZON_DAYS = 7;
 export const BDI_ADOPTION_FRACTION = 1;
+// A household may optimize discretionary time, but it cannot optimize away
+// its access to food. One short market trip each day is the weekly floor.
+export const MIN_WEEKLY_MARKET_HOURS = PLANNING_HORIZON_DAYS;
 
 // Projection effects belong to the BDI rollout, not the retired calendar
 // scheduler. They are deliberately local and side-effect free: market and
@@ -192,7 +196,8 @@ export function scheduleGenerateCandidates(schedule, mv, crisis) {
   const candidates = [];
   for (const [donor, receiver] of pairs) {
     for (const step of deltas) {
-      if (schedule[donor] >= step) {
+      const donorFloor = donor === 'market' ? MIN_WEEKLY_MARKET_HOURS : 0;
+      if (schedule[donor] - step >= donorFloor) {
         const s = { ...schedule };
         s[donor] -= step;
         s[receiver] += step;
@@ -232,27 +237,47 @@ export function todaysBdiActions(npc) {
 
 export function applyBdiDayIfEnabled(npc) {
   npc.useBdiSchedule = true;
-  const options = [...todaysBdiActions(npc), ...bdiPlane2Actions(npc)]
-    .map(action => ({ action, value: scoreAction(action, npc) }))
-    .filter(({ value }) => Number.isFinite(value))
-    .sort((a, b) => b.value - a.value);
-  const chosen = [];
-  const chosenIds = new Set();
-  let hoursLeft = DAILY_HOURS;
-  for (const { action } of options) {
-    // An intention is a commitment under a finite daily time budget. The
-    // previous branch appended every Plane-2 action after a full routine,
-    // allowing impossible 20+ hour days and making marriage/help automatic.
-    if (hoursLeft < 0.1 || chosenIds.has(action.id)) continue;
-    if (action.id !== 'rest' && scoreAction(action, npc) < -1) continue;
-    const duration = Math.min(action.duration, hoursLeft);
-    chosen.push({ ...action, duration });
-    chosenIds.add(action.id);
-    hoursLeft -= duration;
+  // The weekly hill-climber has already committed these basic intentions.
+  // Re-scoring them here used to silently drop market visits when a household
+  // was hungry (the immediate cash cost beat the action's coarse score), so
+  // NPCs accumulated money while starving beside a stocked market.
+  const chosen = todaysBdiActions(npc).map(action => ({ ...action }));
+
+  // The planner's rollout can still be revised from a stale market belief.
+  // At execution time, a low larder creates a non-negotiable provisioning
+  // intention from the live state. This is an interrupt, not a second
+  // optimizer: it simply protects the physical precondition for survival.
+  const needsFoodTrip = npc.needs.food < 0.7 || (npc.inventory.bread ?? 0) < 2;
+  if (needsFoodTrip && !chosen.some(action => action.id === 'market')) {
+    const market = planMarketVisit(npc);
+    if (market) {
+      const donor = chosen.find(action => action.id === 'leisure') ?? chosen.find(action => action.id === 'rest');
+      if (donor && donor.duration > market.duration) {
+        donor.duration -= market.duration;
+        chosen.push(market);
+      }
+    }
   }
-  if (hoursLeft > 0.1) {
-    chosen.push({ id: 'rest', label: 'Rest', duration: hoursLeft, energyRestored: hoursLeft * 12, needEffects: {} });
+
+  // Strategic/social intentions may displace leisure, but never the planned
+  // provisioning, work, or recovery time. This keeps the daily plan within
+  // its fixed budget while still allowing construction, family, and aid.
+  const leisure = chosen.find(action => action.id === 'leisure');
+  if (leisure) {
+    const extras = bdiPlane2Actions(npc)
+      .map(action => ({ action, value: scoreAction(action, npc) }))
+      .filter(({ action, value }) => Number.isFinite(value) && value > 0 && action.duration <= leisure.duration)
+      .sort((a, b) => b.value - a.value);
+    const selectedIds = new Set();
+    for (const { action } of extras) {
+      if (selectedIds.has(action.id) || action.duration > leisure.duration + 0.01) continue;
+      leisure.duration -= action.duration;
+      chosen.push({ ...action });
+      selectedIds.add(action.id);
+    }
+    if (leisure.duration < 0.05) chosen.splice(chosen.indexOf(leisure), 1);
   }
+
   npc.schedule = chosen;
   npc.bdi = {
     ...(npc.bdi ?? {}),

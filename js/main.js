@@ -56,7 +56,6 @@ export function gameLoop(ts) {
     let ticks = 0;
     while (accumulator >= simTickMs && ticks < 10) {
       tickDay();
-      shadowDeliberateAll();
       accumulator -= simTickMs;
       ticks++;
     }
