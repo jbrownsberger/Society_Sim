@@ -2,14 +2,15 @@ import { PROFESSIONS, findStructureByAssetId, findStructureByType } from './cons
 import { rng } from './rng.js';
 import { TIME_USE_WINDOW, tickRelationDecay, world } from './state.js';
 import { postWageOffers } from './labor.js';
-import { considerHouseConstruction, updateAssetDistressStreaks } from './actions.js';
+import { updateAssetDistressStreaks } from './actions.js';
 import { resolveHelpRequests, runMarriageMarket, tickChildren } from './marriage.js';
 import { tickAgingAndDeaths } from './death.js';
-import { buildSchedule } from './scheduler.js';
+import { applyBdiDayIfEnabled, shadowDeliberateAll } from './scheduleBdi.js';
 import { executeSchedule } from './execution.js';
 import { satisfyNeeds } from './needs.js';
 import { runMarketExchange, updateMarketPrices } from './market.js';
-import { considerProfessionSwitch, updateMemory } from './memory.js';
+import { updateMemory } from './memory.js';
+import { bdiReconsiderHousing, bdiReconsiderProfession } from './bdiAgent.js';
 import { adaptMarketStockTargets, collectTithes, decayPerishables, distributeMarketDividends, tickCapital } from './capital.js';
 import { AUCTION_PERIOD_DAYS, distributeBankInterest, distributeChurchAlms, runAssetAuctions, serviceDebts } from './auctions.js';
 
@@ -58,7 +59,11 @@ export function tickDay() {
 
   healStaleAssetPointers();
   postWageOffers();
-  for (const npc of world.npcs.values()) { buildSchedule(npc); npc._seekingMarriageToday = false; }
+  // BDI deliberation is the only path that forms a daily plan. It first
+  // revises the rolling intention from current beliefs, then turns that
+  // intention into today's bounded set of executable actions.
+  shadowDeliberateAll();
+  for (const npc of world.npcs.values()) { applyBdiDayIfEnabled(npc); npc._seekingMarriageToday = false; }
   recordTimeUse();
   // NPCs work first, accumulating output. Then the Market re-prices off
   // yesterday's stock and trades with each NPC individually — no peer-to-
@@ -93,8 +98,8 @@ export function tickDay() {
     const j = Math.floor(rng.float(0, i + 1));
     [switchOrder[i], switchOrder[j]] = [switchOrder[j], switchOrder[i]];
   }
-  for (const npc of switchOrder) considerProfessionSwitch(npc);
-  for (const npc of world.npcs.values()) considerHouseConstruction(npc);
+  for (const npc of switchOrder) bdiReconsiderProfession(npc);
+  for (const npc of world.npcs.values()) bdiReconsiderHousing(npc);
   runMarriageMarket();
   resolveHelpRequests();
   tickChildren();
@@ -150,4 +155,3 @@ export function tickDay() {
     }
   }
 }
-

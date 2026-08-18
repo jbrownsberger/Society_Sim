@@ -234,4 +234,3 @@ export function initWorld() {
 
   seedAssets(); // give every asset-gated starting profession its matching farm/mill/forge/workshop, plus a house for everyone
 }
-

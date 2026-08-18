@@ -23,6 +23,8 @@ export function decayPerishables() {
   }
 }
 
+
+
 // The Market learns its own scale from experience: if a good keeps running
 // out (repeated unmet demand), that's a granary that's too small for how
 // this village actually consumes — the target stock (and capacity, which
@@ -126,5 +128,3 @@ export function collectTithes() {
     }
   }
 }
-
-

@@ -93,6 +93,7 @@ export function updateMarketPrices() {
   }
 }
 
+
 export function runMarketExchange() {
   for (const good of Object.keys(GOODS)) {
     world.market.goods[good].unmetSupply = 0;
@@ -189,4 +190,3 @@ export function runMarketExchange() {
     }
   }
 }
-

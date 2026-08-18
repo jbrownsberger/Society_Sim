@@ -215,4 +215,3 @@ export function executeSchedule(npc) {
     }
   }
 }
-

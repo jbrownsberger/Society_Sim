@@ -2,6 +2,7 @@ import { world } from './state.js';
 import { initWorld } from './npc.js';
 import { initBank } from './auctions.js';
 import { tickDay } from './simulation.js';
+import { seedBdiAdoption } from './scheduleBdi.js';
 import { canvas, drawScene, initCanvas } from './render.js';
 import { selection, updateUI } from './ui.js';
 
@@ -14,6 +15,7 @@ import { selection, updateUI } from './ui.js';
 // ─────────────────────────────────────────────
 initBank();
 initWorld();
+seedBdiAdoption();
 initCanvas();
 
 // ─────────────────────────────────────────────
@@ -122,4 +124,3 @@ export function switchToInspector() {
   document.querySelector('[data-tab="inspector"]').classList.add('active');
   document.getElementById('tab-inspector').classList.add('active');
 }
-

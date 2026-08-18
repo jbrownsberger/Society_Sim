@@ -4,7 +4,6 @@ import { world } from './state.js';
 import { makeNPC } from './npc.js';
 import { profSessionEV } from './valuation.js';
 import { getAvailableActions } from './death.js';
-import { buildDayCandidates } from './scheduler.js';
 import { satisfyNeeds } from './needs.js';
 
 // ─────────────────────────────────────────────
@@ -623,4 +622,3 @@ export function generateChildName(motherSyllables, fatherSyllables, rng) {
   while (j === i) j = rng.int(0, pool.length - 1);
   return { name: combineSyllables(pool[i], pool[j]), syllables: [pool[i], pool[j]] };
 }
-

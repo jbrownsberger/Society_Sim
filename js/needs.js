@@ -154,4 +154,3 @@ export function satisfyNeeds(npc) {
   npc.energy = Math.min(100, npc.energy + restTime * 5);
   if (npc.needs.food < 0.15) npc.energy = Math.max(0, npc.energy - 8); // starvation
 }
-
