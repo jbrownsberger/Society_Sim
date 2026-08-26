@@ -18,9 +18,12 @@ import { world } from './state.js';
 // Hard rule: nothing in this file may write to any field the economic
 // simulation reads back (inventory, savings, needs, energy, skills,
 // relations, primaryAsset, etc.) — only the visual fields destX/destY/
-// currentAction. If this whole module were deleted and never called,
-// tickDay() would produce byte-identical economic results; the village
-// would just stop visibly walking between buildings.
+// currentAction, plus a private _moveActionRef bookkeeping field this
+// module owns exclusively (see updateScheduleMovement below) and no
+// other file reads or writes. If this whole module were deleted and
+// never called, tickDay() would produce byte-identical economic
+// results; the village would just stop visibly walking between
+// buildings.
 //
 // Also deliberately uses its own Math.random()-based jitter rather than
 // the shared seeded `rng` from rng.js — that stream feeds the actual
@@ -114,13 +117,30 @@ function scheduleActionAt(npc, dayFraction) {
 // computed by the game loop's accumulator/simTickMs ratio — the same
 // value that used to be passed into drawScene and ignored. Only
 // touches destX/destY/currentAction; picks a fresh jittered spot only
-// when the NPC actually crosses into a new schedule slot, so they don't
-// vibrate in place while sitting in one action for hours.
+// when the NPC actually crosses into a new schedule slot.
+//
+// Change-detection deliberately does NOT compare against
+// npc.currentAction: both scheduler.js (buildSchedule) and
+// scheduleBdi.js (planWeek) set npc.currentAction = schedule[0].id the
+// moment they build the day's schedule, inside tickDay() — i.e. before
+// this function ever runs for that day. Comparing against
+// currentAction would see it already matching schedule[0].id and wrongly
+// conclude "no change", so the very first slot of every day would keep
+// whatever destX/destY was left over from the END of the previous day
+// (commonly wherever the NPC's last action happened to be — church,
+// most visibly) instead of walking to today's first destination.
+// Comparing by the schedule ACTION OBJECT's identity instead sidesteps
+// this entirely: buildSchedule/planWeek construct a brand-new array of
+// action objects every day, so day 1's identity is never day 2's, even
+// when both happen to be a 'work' action — guaranteeing a fresh
+// destination gets picked the moment a new day's first slot is reached,
+// regardless of what currentAction was already set to.
 export function updateScheduleMovement(dayFraction) {
   for (const npc of world.npcs.values()) {
     const action = scheduleActionAt(npc, dayFraction);
     if (!action) continue;
-    if (npc.currentAction !== action.id) {
+    if (npc._moveActionRef !== action) {
+      npc._moveActionRef = action;
       npc.currentAction = action.id;
       const { x, y } = resolveActionDestination(npc, action);
       npc.destX = x;
