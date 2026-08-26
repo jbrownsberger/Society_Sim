@@ -31,6 +31,16 @@ document.getElementById('btn-pause').onclick = function() {
   document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active'));
   this.classList.add('active');
 };
+document.getElementById('btn-0.1x').onclick = function() {
+  simTickMs = 6000;
+  document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active'));
+  this.classList.add('active');
+};
+document.getElementById('btn-0.2x').onclick = function() {
+  simTickMs = 3000;
+  document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active'));
+  this.classList.add('active');
+};
 document.getElementById('btn-1x').onclick = function() {
   simTickMs = 600;
   document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active'));
