@@ -2,6 +2,7 @@ import { ASSET_TYPES, PROFESSIONS, findStructureByType } from './constants.js';
 import { rng } from './rng.js';
 import { world } from './state.js';
 import { selection } from './ui.js';
+import { updateScheduleMovement } from './movement.js';
 
 // ─────────────────────────────────────────────
 // RENDERING
@@ -55,6 +56,13 @@ export function getActionColor(npcOrActionId) {
 }
 
 export function drawScene(alpha) {
+  // alpha is how far real time has progressed through the sim-day
+  // currently in progress (0 = the day just started, 1 = about to
+  // roll over) — see gameLoop() in main.js. Purely-visual: reads
+  // each NPC's already-resolved schedule to update walk destinations;
+  // never touches anything the economic tick depends on.
+  updateScheduleMovement(alpha);
+
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0,0,W,H);
 

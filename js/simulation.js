@@ -1,4 +1,3 @@
-import { PROFESSIONS, findStructureByAssetId, findStructureByType } from './constants.js';
 import { rng } from './rng.js';
 import { TIME_USE_WINDOW, tickRelationDecay, world } from './state.js';
 import { postWageOffers } from './labor.js';
@@ -107,51 +106,15 @@ export function tickDay() {
   for (const npc of world.npcs.values()) tickCapital(npc);
   decayPerishables();
 
-  // Update NPC destinations for animation
-  for (const npc of world.npcs.values()) {
-    const action = npc.schedule[0];
-    if (action) {
-      npc.currentAction = action.id;
-      if (action.id.startsWith('work')) {
-        // Millers & toolmakers walk to the specific mill/forge THEY
-        // operate (their primaryAsset's structure), not just any
-        // building of the right type — matters now that several can
-        // exist at once. Falls back to type-match if that lookup fails.
-        let workBuilding = npc.primaryAsset != null
-          ? findStructureByAssetId(npc.primaryAsset)
-          : null;
-        if (!workBuilding && PROFESSIONS[npc.profession]?.requires) {
-          workBuilding = findStructureByType(PROFESSIONS[npc.profession].requires);
-        }
-        if (workBuilding) {
-          npc.destX = workBuilding.x + rng.float(-12,12);
-          npc.destY = workBuilding.y + rng.float(-12,12);
-        } else {
-          npc.destX = npc.homeX + rng.float(-20,20);
-          npc.destY = npc.homeY + 30 + rng.float(-10,10);
-        }
-      } else if (action.id === 'market') {
-        // Move toward market
-        const marketBuilding = findStructureByType('market');
-        if (marketBuilding) {
-          npc.destX = marketBuilding.x + rng.float(-15,15);
-          npc.destY = marketBuilding.y + rng.float(-15,15);
-        }
-      } else if (action.id === 'church') {
-        // Move toward church
-        const churchBuilding = findStructureByType('church');
-        if (churchBuilding) {
-          npc.destX = churchBuilding.x + rng.float(-15,15);
-          npc.destY = churchBuilding.y + rng.float(-15,15);
-        }
-      } else if (action.id === 'socialize') {
-        // Move toward center
-        npc.destX = 380 + rng.float(-40,40);
-        npc.destY = 280 + rng.float(-40,40);
-      } else {
-        npc.destX = npc.homeX + rng.float(-8,8);
-        npc.destY = npc.homeY + rng.float(-8,8);
-      }
-    }
-  }
+  // NOTE: NPC destX/destY/currentAction are no longer set here. Once
+  // today's schedule is finalized above, the purely-visual sub-day
+  // clock in movement.js (driven every animation frame from
+  // drawScene(dayFraction) in render.js) walks npc.schedule itself to
+  // decide where each NPC should currently be drawn walking toward.
+  // That split is deliberate: this function has already fully resolved
+  // every economic consequence of today's schedule by this point
+  // (executeSchedule ran earlier in this same tick), so the animation
+  // system is free to consume npc.schedule at its own pace — even
+  // "periodically" per the requirement that the visual layer reflect
+  // the simulation without being load-bearing for it.
 }
