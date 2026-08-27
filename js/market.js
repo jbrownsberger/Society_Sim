@@ -1,7 +1,7 @@
 import { clamp } from './utils.js';
 import { GOODS, PROFESSIONS } from './constants.js';
 import { rng } from './rng.js';
-import { PRICE_ADJUST_RATE, PRICE_ELASTICITY, world } from './state.js';
+import { PRICE_ADJUST_RATE, PRICE_ELASTICITY, adjustSavings, world } from './state.js';
 import { marketAsk } from './prices.js';
 import { effectiveSkill, getBufferTarget } from './death.js';
 
@@ -135,7 +135,7 @@ export function runMarketExchange() {
           if (qty > 0.05) {
             const revenue = qty * g.bidPrice;
             npc.inventory[good] = have - qty;
-            npc.savings += revenue;
+            adjustSavings(npc, revenue, 'market_sale');
             g.stock += qty;
             g.cash  -= revenue;
             repriceGood(good);
@@ -169,7 +169,7 @@ export function runMarketExchange() {
         if (qty > 0.05) {
           const cost = qty * g.askPrice;
           npc.inventory[good] = (npc.inventory[good] ?? 0) + qty;
-          npc.savings -= cost;
+          adjustSavings(npc, -cost, 'market_purchase');
           g.stock -= qty;
           g.cash  += cost;
           repriceGood(good);

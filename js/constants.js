@@ -112,7 +112,7 @@ export const GRID_CELL = 22;           // px per tile
 export const GRID_ANCHOR = { gx: 18, gy: 14 }; // town-center tile, spiral search starts here
 export const FOOTPRINTS = {
   market: 2, well: 1, mill: 2, forge: 2, workshop: 2, church: 2,
-  farm: 2, house: 1,
+  farm: 2, house: 1, construction_center: 2, agora: 2,
 };
 
 export function gridKey(gx, gy) { return gx + ',' + gy; }

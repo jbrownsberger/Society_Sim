@@ -1,6 +1,6 @@
 import { clamp } from './utils.js';
 import { ASSET_TYPES, BUFFER_STOCK_EFFECTS, DOG_YEAR_DAYS, NEEDS, PRESTIGE_HELP_GAIN, PROFESSIONS, WORK_SESSION_HOURS, findStructureByAssetId, housingQuality, recordStructureTransfer, shouldKeepForConsumption } from './constants.js';
-import { getAffinity, logEvent, world } from './state.js';
+import { adjustSavings, getAffinity, logEvent, world } from './state.js';
 import { expectedPrice, lambda, marketAsk, speculativeCarryValue } from './prices.js';
 import { profSessionEV } from './valuation.js';
 import { planAssetSaleActions, planChurchVisit, planConstructionAction, planMarketVisit, planTinkerAction } from './actions.js';
@@ -60,7 +60,7 @@ export function killNPC(npc, cause) {
     // wealth should have concentrated into. Split evenly across heirs,
     // same spirit as the asset round-robin above.
     const share = npc.savings / heirs.length;
-    for (const heir of heirs) heir.savings += share;
+    for (const heir of heirs) adjustSavings(heir, share, 'inheritance');
     if (spouse) spouse.spouseId = null; // widowed
   } else {
     // No spouse and no living adult children to inherit — release assets

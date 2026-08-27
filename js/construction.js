@@ -1,5 +1,5 @@
 import { ASSET_TYPES, GRID_CELL, PROFESSIONS, createOwnedAsset, findStructureByAssetId, hasWorkableAsset } from './constants.js';
-import { logEvent, world } from './state.js';
+import { adjustSavings, logEvent, world } from './state.js';
 import { expectedPrice, lambda } from './prices.js';
 import { profSessionEV } from './valuation.js';
 import { repriceGood } from './market.js';
@@ -125,7 +125,7 @@ export function startConstruction(npc, assetType) {
     if (shortfall > 0) {
       const g_market = world.market.goods[g];
       const cost = shortfall * g_market.askPrice;
-      npc.savings -= cost;
+      adjustSavings(npc, -cost, 'construction_materials');
       g_market.cash += cost;
       g_market.stock -= shortfall;
       npc.inventory[g] = have + shortfall;

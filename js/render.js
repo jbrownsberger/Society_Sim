@@ -3,6 +3,7 @@ import { rng } from './rng.js';
 import { world } from './state.js';
 import { selection } from './ui.js';
 import { updateScheduleMovement } from './movement.js';
+import { clamp } from './utils.js';
 
 // ─────────────────────────────────────────────
 // RENDERING
@@ -53,6 +54,56 @@ export function getActionColor(npcOrActionId) {
   if (actionId === 'socialize')        return ACTION_COLORS.socialize;
   if (actionId === 'rest')             return ACTION_COLORS.rest;
   return ACTION_COLORS.idle;
+}
+
+// ─────────────────────────────────────────────
+// NPC DOT COLOR — VIEW MODES
+// ─────────────────────────────────────────────
+// Now that NPCs actually walk to the building matching their current
+// action (see movement.js), coloring the dot by action is redundant —
+// you can already tell what someone's doing by where they are. The dot
+// is free to encode a different variable instead. This is written as a
+// small dispatcher so more view modes (prestige, needs, profession...)
+// can be added later just by adding a case here and a UI toggle,
+// without touching the render loop itself. 'wealth' is the only mode
+// wired up today; getActionColor above is kept as the implementation
+// for a future 'action' mode, not currently selected anywhere.
+export let dotColorMode = 'wealth';
+export function setDotColorMode(mode) { dotColorMode = mode; }
+
+const WEALTH_COLOR_STOPS = [
+  { t: 0,   c: [139, 58, 26] },   // rust brown — poorest in the village right now
+  { t: 0.5, c: [201, 162, 39] },  // gold — median
+  { t: 1,   c: [44, 107, 63] },   // deep green — wealthiest in the village right now
+];
+
+// Colors relative to the CURRENT village's own savings spread (min→max
+// each frame) rather than fixed absolute thresholds — a hamlet where
+// everyone has 20¢ and one where everyone has 2000¢ should each still
+// show visible rich/poor contrast, since what matters here is relative
+// standing within this village, not an arbitrary global scale.
+function wealthColor(savings, minWealth, maxWealth) {
+  const range = Math.max(1, maxWealth - minWealth);
+  const t = clamp((savings - minWealth) / range, 0, 1);
+  let lo = WEALTH_COLOR_STOPS[0], hi = WEALTH_COLOR_STOPS[WEALTH_COLOR_STOPS.length - 1];
+  for (let i = 0; i < WEALTH_COLOR_STOPS.length - 1; i++) {
+    if (t >= WEALTH_COLOR_STOPS[i].t && t <= WEALTH_COLOR_STOPS[i+1].t) {
+      lo = WEALTH_COLOR_STOPS[i]; hi = WEALTH_COLOR_STOPS[i+1]; break;
+    }
+  }
+  const span = (hi.t - lo.t) || 1;
+  const localT = (t - lo.t) / span;
+  const r = Math.round(lo.c[0] + (hi.c[0]-lo.c[0]) * localT);
+  const g = Math.round(lo.c[1] + (hi.c[1]-lo.c[1]) * localT);
+  const b = Math.round(lo.c[2] + (hi.c[2]-lo.c[2]) * localT);
+  return `rgb(${r},${g},${b})`;
+}
+
+// Called once per frame (not per NPC) so every dot is colored relative
+// to the same village-wide min/max snapshot.
+function getDotColor(npc, minWealth, maxWealth) {
+  if (dotColorMode === 'action') return getActionColor(npc);
+  return wealthColor(npc.savings, minWealth, maxWealth);
 }
 
 export function drawScene(alpha) {
@@ -203,6 +254,32 @@ export function drawScene(alpha) {
       ctx.moveTo(b.x+6,b.y-10); ctx.lineTo(b.x+6,b.y-2);
       ctx.moveTo(b.x-8,b.y-10); ctx.lineTo(b.x+8,b.y-10); ctx.stroke();
 
+    } else if (b.type === 'construction_center') {
+      // Timber yard: stacked log pile + a-frame hoist, distinct from an
+      // in-progress build (which has no structure yet — see movement.js)
+      ctx.fillStyle = '#9c8258';
+      ctx.fillRect(b.x-16, b.y-4, 32, 12); ctx.strokeRect(b.x-16, b.y-4, 32, 12);
+      // log-end circles along the stack, alternating fill for a stacked-log look
+      ctx.fillStyle = '#7a5a34';
+      for (let i=-13; i<=13; i+=7) { ctx.beginPath(); ctx.arc(b.x+i, b.y+2, 4, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
+      // A-frame hoist
+      ctx.strokeStyle = '#4a3020'; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(b.x-10, b.y-4); ctx.lineTo(b.x, b.y-24); ctx.lineTo(b.x+10, b.y-4);
+      ctx.moveTo(b.x, b.y-24); ctx.lineTo(b.x, b.y-8);
+      ctx.stroke();
+
+    } else if (b.type === 'agora') {
+      // Open plaza ringed with columns — visually distinct from the
+      // roofed Market stall: this is where people gather to socialize,
+      // not to trade.
+      ctx.fillStyle = '#cfc4a8';
+      ctx.beginPath(); ctx.ellipse(b.x, b.y+4, 20, 10, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#8a7a5a'; ctx.lineWidth = 3;
+      [[-16,-2],[-8,-6],[0,-8],[8,-6],[16,-2]].forEach(([dx,dy]) => {
+        ctx.beginPath(); ctx.moveTo(b.x+dx, b.y+dy); ctx.lineTo(b.x+dx, b.y+dy+14); ctx.stroke();
+      });
+
     } else if (b.type === 'workshop' || b.type === 'farm') {
       ctx.fillStyle = b.type === 'farm' ? '#b8a860' : '#a89880';
       ctx.fillRect(b.x-13, b.y-10, 26, 22); ctx.strokeRect(b.x-13, b.y-10, 26, 22);
@@ -235,12 +312,17 @@ export function drawScene(alpha) {
   }
 
   // NPCs — interpolate position
+  let minWealth = Infinity, maxWealth = -Infinity;
+  for (const npc of world.npcs.values()) {
+    if (npc.savings < minWealth) minWealth = npc.savings;
+    if (npc.savings > maxWealth) maxWealth = npc.savings;
+  }
   for (const npc of world.npcs.values()) {
     const x = npc.x + (npc.destX - npc.x) * 0.12;
     const y = npc.y + (npc.destY - npc.y) * 0.12;
     npc.x = x; npc.y = y;
 
-    const color = getActionColor(npc);
+    const color = getDotColor(npc, minWealth, maxWealth);
     const isSelected = selection.npc === npc.id;
 
     // Shadow

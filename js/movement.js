@@ -81,13 +81,24 @@ export function resolveActionDestination(npc, action) {
   }
 
   if (action.id === 'socialize') {
+    const agoraBuilding = findStructureByType('agora');
+    if (agoraBuilding) {
+      return { x: agoraBuilding.x + jitter(SOCIAL_JITTER), y: agoraBuilding.y + jitter(SOCIAL_JITTER) };
+    }
     return { x: TOWN_CENTER.x + jitter(SOCIAL_JITTER), y: TOWN_CENTER.y + jitter(SOCIAL_JITTER) };
   }
 
-  // rest, tinker, build (no structure exists yet mid-construction),
-  // seek_marriage, seek_child, ask_help, help, list/delist-asset-sale,
-  // and anything unrecognized all default to "at home" — matches the
-  // fallback the old single-shot destination code used.
+  if (action.id === 'build') {
+    const constructionCenter = findStructureByType('construction_center');
+    if (constructionCenter) {
+      return { x: constructionCenter.x + jitter(BUILD_JITTER), y: constructionCenter.y + jitter(BUILD_JITTER) };
+    }
+  }
+
+  // rest, tinker, seek_marriage, seek_child, ask_help, help,
+  // list/delist-asset-sale, and anything unrecognized all default to
+  // "at home" — matches the fallback the old single-shot destination
+  // code used.
   return { x: npc.homeX + jitter(HOME_JITTER), y: npc.homeY + jitter(HOME_JITTER) };
 }
 

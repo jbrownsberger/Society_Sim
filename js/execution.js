@@ -1,6 +1,6 @@
 import { clamp } from './utils.js';
 import { ASSET_TYPES } from './constants.js';
-import { bumpAffinity, logEvent, world } from './state.js';
+import { adjustSavings, bumpAffinity, logEvent, world } from './state.js';
 import { completeConstruction } from './construction.js';
 import { TINKER_SKILL_CEILING } from './actions.js';
 import { attemptChildbirth } from './marriage.js';
@@ -46,8 +46,8 @@ export function executeSchedule(npc) {
           }
         }
         const wagePaid = Math.min(action.wage, employer.savings);
-        employer.savings -= wagePaid;
-        npc.savings += wagePaid;
+        adjustSavings(employer, -wagePaid, 'wages_paid');
+        adjustSavings(npc, wagePaid, 'wages_earned');
         const asset = world.assets.get(action.assetId);
         if (asset) {
           asset.employedLaborIds = asset.employedLaborIds || [];
@@ -110,8 +110,8 @@ export function executeSchedule(npc) {
       if (requester) {
         const actualAmount = Math.min(req.amount, Math.max(0, npc.savings));
         if (actualAmount > 0.1) {
-          npc.savings -= actualAmount;
-          requester.savings += actualAmount;
+          adjustSavings(npc, -actualAmount, 'help_given');
+          adjustSavings(requester, actualAmount, 'help_received');
           bumpAffinity(requester, npc.id, 0.15);
           bumpAffinity(npc, req.requesterId, 0.04);
           logEvent(`${npc.name} helped ${requester.name} in their time of need.`, [npc.id, requester.id]);

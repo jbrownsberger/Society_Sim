@@ -51,6 +51,7 @@ export function makeNPC(prof, x, y) {
     x, y, destX: x, destY: y, moving: false,
     energy: 80 + rng.float(0,20),
     savings: rng.float(60, 150), // raised again: the (20,55) range left most
+    financeLog: [], // rolling recent income/expenditure history — see adjustSavings() in state.js
     // NPCs one bad week from the SAVINGS_RESERVE floor, unable to afford
     // work inputs or switching costs. A deeper cash buffer gives the
     // village room to actually respond to price signals instead of being
@@ -231,6 +232,8 @@ export function initWorld() {
   createInstitutionStructure('market', 'Market');
   createInstitutionStructure('well', 'Well');
   createInstitutionStructure('church', 'Church');
+  createInstitutionStructure('construction_center', 'Construction Center');
+  createInstitutionStructure('agora', 'Agora');
 
   seedAssets(); // give every asset-gated starting profession its matching farm/mill/forge/workshop, plus a house for everyone
 }

@@ -342,6 +342,24 @@ export function drawInspector(npc) {
     ? npcEvents.map(e => `<div style="margin-bottom:2px"><span style="color:var(--ink-faded)">Day ${e.day}:</span> ${e.text}</div>`).join('')
     : `<div style="color:var(--ink-faded);font-style:italic">Nothing notable yet.</div>`;
 
+  // Recent income & expenditures — built from npc.financeLog, populated
+  // by the single adjustSavings() choke point in state.js so every real
+  // cash movement (wages, market trades, tithes/alms, construction
+  // materials, help given/received, inheritance, etc.) shows up here
+  // without this panel needing to know about each source individually.
+  const recentFinance = (npc.financeLog || []).slice(0, 12);
+  const financeHtml = recentFinance.length
+    ? recentFinance.map(f => {
+        const positive = f.amount >= 0;
+        const color = positive ? '#2e7d32' : '#8b3a1a';
+        const label = FINANCE_CATEGORY_LABELS[f.category] || f.category;
+        return `<div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:1px">
+          <span><span style="color:var(--ink-faded)">Day ${f.day}:</span> ${label}</span>
+          <span style="color:${color}">${positive?'+':''}${f.amount.toFixed(1)}¢</span>
+        </div>`;
+      }).join('')
+    : `<div style="color:var(--ink-faded);font-style:italic;font-size:0.72rem">No transactions yet.</div>`;
+
   // Relationships — sorted by |affinity|, so both strong devotion and
   // strong odium surface first rather than getting buried under a long
   // tail of near-zero acquaintances. Capped to the top handful for
@@ -401,6 +419,10 @@ export function drawInspector(npc) {
       <div style="font-size:0.7rem;font-style:italic;color:var(--ink-faded);margin-bottom:2px">Time use (avg, last 14 days)</div>
       ${timeUseHtml}
     </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:0.7rem;font-style:italic;color:var(--ink-faded);margin-bottom:2px">Recent income & expenditures</div>
+      <div style="max-height:140px;overflow-y:auto">${financeHtml}</div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <div>
         <div style="font-size:0.7rem;font-style:italic;color:var(--ink-faded);margin-bottom:2px">Profession EVs</div>
@@ -442,6 +464,19 @@ export function setBuildingProductivity(type, value) {
   const label = document.getElementById('prod-label-' + type);
   if (label) label.textContent = parseFloat(value).toFixed(2) + 'x';
 }
+
+export const FINANCE_CATEGORY_LABELS = {
+  wages_earned: 'Wages earned', wages_paid: 'Wages paid (as employer)',
+  market_sale: 'Sold at market', market_purchase: 'Bought at market',
+  market_dividend: 'Market dividend', bank_interest: 'Bank interest',
+  tithe: 'Tithe', alms: 'Alms received',
+  construction_materials: 'Construction materials',
+  asset_purchase: 'Bought asset', asset_sale: 'Sold asset',
+  profession_switch: 'Profession switch cost', training_fee: 'Training fee received',
+  debt_payment: 'Debt payment', childbirth_cost: 'Childbirth cost',
+  child_feeding: 'Fed a child', help_given: 'Helped another villager',
+  help_received: 'Received help', inheritance: 'Inheritance',
+};
 
 export const TIME_USE_LABELS = {
   work: 'Own trade', 'hired-labor': 'Hired labor', market: 'Market',

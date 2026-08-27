@@ -1,5 +1,5 @@
 import { ASSET_TYPES, GOODS, MAX_FARMS, PRODUCTIVE_ASSET_TYPES, PROFESSIONS, countAssetsOfType, countNpcsInProfession, hasWorkableAsset } from './constants.js';
-import { logEvent, world } from './state.js';
+import { adjustSavings, logEvent, world } from './state.js';
 import { YEAR_LENGTH } from './npc.js';
 import { lambda } from './prices.js';
 import { profSessionEV } from './valuation.js';
@@ -204,13 +204,13 @@ export function considerProfessionSwitch(npc) {
   // the same day, since only the currently-wealthy can afford entry.
   if (npc.savings < plan.totalCost) return;
 
-  npc.savings -= plan.materialsCost;
+  adjustSavings(npc, -plan.materialsCost, 'profession_switch');
   world.market.goods.tools.cash += plan.materialsCost; // bought equipment/materials through the Market
 
   if (plan.trainingCost > 0 && plan.payees.length > 0) {
     const share = plan.trainingCost / plan.payees.length;
-    for (const payee of plan.payees) payee.savings += share;
-    npc.savings -= plan.trainingCost;
+    for (const payee of plan.payees) adjustSavings(payee, share, 'training_fee');
+    adjustSavings(npc, -plan.trainingCost, 'profession_switch');
   }
 
   // Record the leaver so whoever switches into this trade next still has
