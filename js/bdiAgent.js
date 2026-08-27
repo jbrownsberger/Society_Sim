@@ -1,5 +1,5 @@
 import { ASSET_TYPES, MAX_FARMS, NEEDS, PRODUCTIVE_ASSET_TYPES, PROFESSIONS, SEASONAL_GRAIN, buildingProductivity, countAssetsOfType, countNpcsInProfession, hasWorkableAsset, housingQuality } from './constants.js';
-import { getAffinity, world } from './state.js';
+import { adjustSavings, getAffinity, world } from './state.js';
 import { expectedPrice, lambda } from './prices.js';
 import { computeConstructionEV, startConstruction } from './construction.js';
 import { planAssetSaleActions, planChurchVisit, planConstructionAction, planTinkerAction } from './actions.js';
@@ -98,12 +98,12 @@ function adoptProfession(npc, bestAlt, plan) {
   if (!plan) plan = planProfessionSwitch(npc, bestAlt);
   if (plan.totalCost > 0 && npc.savings < plan.totalCost) return;
 
-  npc.savings -= plan.materialsCost;
+  adjustSavings(npc, -plan.materialsCost, 'profession_switch');
   world.market.goods.tools.cash += plan.materialsCost;
   if (plan.trainingCost > 0 && plan.payees.length > 0) {
     const share = plan.trainingCost / plan.payees.length;
-    for (const payee of plan.payees) payee.savings += share;
-    npc.savings -= plan.trainingCost;
+    for (const payee of plan.payees) adjustSavings(payee, share, 'training_fee');
+    adjustSavings(npc, -plan.trainingCost, 'profession_switch');
   }
 
   const hist = world.professionHistory[npc.profession] ?? (world.professionHistory[npc.profession] = []);

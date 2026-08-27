@@ -1,5 +1,5 @@
 import { ASSET_TYPES, findStructureByAssetId, recordStructureTransfer } from './constants.js';
-import { POPULATION, logEvent, world } from './state.js';
+import { POPULATION, adjustSavings, logEvent, world } from './state.js';
 import { discountRate } from './prices.js';
 import { profSessionEV } from './valuation.js';
 import { ASSET_VALUE_HORIZON, estimateAssetValue } from './actions.js';
@@ -136,7 +136,7 @@ export function serviceDebts() {
     for (const debt of npc.debts) {
       const payment = Math.min(debt.dailyPayment, debt.remaining, npc.savings);
       if (payment > 0) {
-        npc.savings -= payment;
+        adjustSavings(npc, -payment, 'debt_payment');
         debt.remaining -= payment;
         world.bank.cash += payment; // principal recovery + interest both accrue to the Bank
       }
@@ -180,7 +180,7 @@ export function distributeBankInterest() {
 
   const payout = excess * BANK_PAYOUT_RATE; // smoothed — most of the excess stays as growing capital, not dumped in one day
   for (const n of npcs) {
-    n.savings += payout * (n.savings / totalSavings);
+    adjustSavings(n, payout * (n.savings / totalSavings), 'bank_interest');
   }
   world.bank.cash -= payout;
   world.bank.interestPaidToday = payout;
@@ -273,12 +273,12 @@ export function runAssetAuctions() {
       const downPayment = Math.min(bestBid * DOWN_PAYMENT_FRACTION, bestBidder.savings);
       const financedAmount = bestBid - downPayment;
 
-      bestBidder.savings -= downPayment;
+      adjustSavings(bestBidder, -downPayment, 'asset_purchase');
       // Orphaned estate (owner died with no heir — see killNPC): there's
       // no seller to pay, so proceeds go to the Church instead, same
       // "unclaimed estate" handling as any other institutional windfall,
       // rather than vanishing or crediting a dead id.
-      if (seller) seller.savings += downPayment;
+      if (seller) adjustSavings(seller, downPayment, 'asset_sale');
       else world.church.cash += downPayment;
       if (financedAmount > 0.01) {
         // The Bank advances the seller the financed portion in full,
@@ -292,7 +292,7 @@ export function runAssetAuctions() {
         // the Bank's reserve recovers (see serviceDebts/
         // distributeBankInterest).
         const bankFunded = Math.min(financedAmount, world.bank.cash);
-        if (seller) seller.savings += bankFunded;
+        if (seller) adjustSavings(seller, bankFunded, 'asset_sale');
         else world.church.cash += bankFunded;
         if (bankFunded > 0.01) issueDebt(bestBidder, bankFunded);
       }
@@ -360,7 +360,7 @@ export function distributeChurchAlms() {
     // Normal case: hand out alms proportional to how far behind the
     // village mean each NPC has fallen.
     for (const { n, shortfall } of needy) {
-      n.savings += excess * (shortfall / totalShortfall);
+      adjustSavings(n, excess * (shortfall / totalShortfall), 'alms');
     }
   } else {
     // Fix: previously, when the whole village was uniformly poor (near-zero
@@ -372,7 +372,7 @@ export function distributeChurchAlms() {
     // there's real excess but no meaningful inequality to correct, pay it
     // out as a flat per-capita dividend instead of hoarding it.
     const perCapita = excess / npcs.length;
-    for (const n of npcs) n.savings += perCapita;
+    for (const n of npcs) adjustSavings(n, perCapita, 'alms');
   }
 
   if (excess > 1) {

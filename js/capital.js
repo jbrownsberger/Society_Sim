@@ -1,5 +1,5 @@
 import { GOODS } from './constants.js';
-import { marketTargetStock, logEvent, world } from './state.js';
+import { adjustSavings, marketTargetStock, logEvent, world } from './state.js';
 import { TITHE_CAP, TITHE_RATE } from './actions.js';
 
 // ─────────────────────────────────────────────
@@ -101,7 +101,7 @@ export function distributeMarketDividends() {
   if (pool > 0.01 && totalHours > 0.01) {
     for (const { npc, duration } of visitors) {
       const share = pool * (duration / totalHours);
-      npc.savings += share;
+      adjustSavings(npc, share, 'market_dividend');
       npc.lastDividend = share;
     }
     const perHour = pool / totalHours;
@@ -132,7 +132,7 @@ export function collectTithes() {
     if (!visit) continue;
     const tithe = Math.min(Math.max(0, npc.savings) * TITHE_RATE, TITHE_CAP);
     if (tithe > 0.01) {
-      npc.savings -= tithe;
+      adjustSavings(npc, -tithe, 'tithe');
       world.church.cash += tithe;
     }
   }

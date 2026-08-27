@@ -179,6 +179,28 @@ export function logEvent(text, npcIds) {
   if (world.eventLog.length > 40) world.eventLog.pop();
 }
 
+// Single choke point for every real change to an NPC's cash — mirrors
+// logEvent's "one place, everything downstream benefits" pattern. Every
+// site in the codebase that pays or charges an NPC (wages, market
+// trades, tithes/alms, construction materials, profession-switch costs,
+// auction settlements, inheritance, childbirth costs, help given/
+// received, bank interest, debt service...) should go through this
+// instead of touching npc.savings directly, so the Inspector can show a
+// real itemized recent-income/expenditure history without every call
+// site needing to know about that bookkeeping. `category` is a short id
+// (see FINANCE_CATEGORIES in ui.js for display labels); `amount` is
+// signed (+income, -expense). Deliberately does NOT touch anything the
+// economic simulation reads back other than savings itself — financeLog
+// is purely a record of what already happened, never an input to any
+// decision.
+export function adjustSavings(npc, amount, category) {
+  npc.savings += amount;
+  if (Math.abs(amount) < 0.005) return; // don't clutter the log with rounding dust
+  if (!npc.financeLog) npc.financeLog = [];
+  npc.financeLog.unshift({ day: world.day, amount, category });
+  if (npc.financeLog.length > 60) npc.financeLog.pop();
+}
+
 // ─────────────────────────────────────────────
 // RELATIONS — devotion (+) / odium (-) between specific NPCs.
 // ─────────────────────────────────────────────

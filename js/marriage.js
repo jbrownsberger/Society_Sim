@@ -1,6 +1,6 @@
 import { ACTIVITY_SOCIAL_CAP, CHILDHOOD_DAYS, DOG_YEAR_DAYS, GOODS, GRID_ANCHOR, GRID_CELL, MATERIAL_COMFORT_CAP, NEEDS, familyChannelTarget, familyTargetFromComposition, generateChildName, needMarginalUtility } from './constants.js';
 import { rng } from './rng.js';
-import { bumpAffinity, getAffinity, logEvent, seedKinshipAffinity, world } from './state.js';
+import { adjustSavings, bumpAffinity, getAffinity, logEvent, seedKinshipAffinity, world } from './state.js';
 import { makeNPC } from './npc.js';
 
 // ─────────────────────────────────────────────
@@ -188,8 +188,8 @@ export function attemptChildbirth(npc) {
   const combinedSavings = npc.savings + spouse.savings;
   if (combinedSavings < CHILDBIRTH_MATERIAL_COST) return;
   const share = Math.min(npc.savings, CHILDBIRTH_MATERIAL_COST / 2);
-  npc.savings -= share;
-  spouse.savings -= (CHILDBIRTH_MATERIAL_COST - share);
+  adjustSavings(npc, -share, 'childbirth_cost');
+  adjustSavings(spouse, -(CHILDBIRTH_MATERIAL_COST - share), 'childbirth_cost');
   world.church.cash += CHILDBIRTH_MATERIAL_COST; // midwife/blessing fee — same pool as tithes, not a sink
   spawnChild(npc, spouse);
 }
@@ -236,7 +236,7 @@ export function tickChildren() {
         // the market shelf full, which systematically understated bread
         // scarcity and broke the grain-to-bread production margin.
         if (p.savings >= cost && (breadMarket?.stock ?? 0) >= CHILD_FOOD_COST_PER_DAY) {
-          p.savings -= cost;
+          adjustSavings(p, -cost, 'child_feeding');
           breadMarket.cash += cost;
           breadMarket.stock -= CHILD_FOOD_COST_PER_DAY;
           fed = true; break;
